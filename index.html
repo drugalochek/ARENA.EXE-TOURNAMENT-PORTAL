@@ -44,7 +44,7 @@
     window.lang = localStorage.getItem('arena_lang') || 'en';
     const i18n = {
       en: {
-        discover: "DISCOVER", create: "CREATE", profile: "PROFILE", wins: "WINRATE", hours: "ONLINE", 
+        discover: "DISCOVER", create: "CREATE", profile: "PROFILE", exr: "EXR", hours: "ONLINE", 
         friends: "FRIENDS", vacant: "VACANT", connect: "CONNECT", delete_event: "DELETE EVENT", 
         message: "MESSAGE...", nickname: "NICKNAME", password: "PASSWORD", login: "LOG IN", join: "JOIN",
         change_name: "CHANGE NAME", save: "SAVE", cancel: "CANCEL", social_link: "SOCIAL LINK", label: "LABEL (DISCORD)",
@@ -64,14 +64,16 @@
         unban_q: " UNBAN THIS PLAYER?", status_updated: "STATUS UPDATED", name_updated: "NAME UPDATED", 
         link_saved: "LINK SAVED", fill_fields: "FILL ALL FIELDS", event_created: "EVENT CREATED: ", 
         cannot_ban_self: "CANNOT BAN SELF", reg_err: "REG ERROR", access_denied: "ACCESS DENIED",
-        terminated_sub: "ЗАБЛОКИРОВАН", founder_sub: "FOUNDER / CEO", elite_sub: "ELITE ADMIN", 
+        terminated_sub: "BANNED", founder_sub: "FOUNDER / CEO", elite_sub: "ELITE ADMIN", 
         admin_sub: "ADMINISTRATOR", pro_sub: "PRO PLAYER", player_sub: "PLAYER", copy: "COPY",
         add_friend: "ADD FRIEND", sent: "SENT", accept: "ACCEPT", chat: "CHAT", by: "BY", back: "BACK",
         del_msg: "DELETE MESSAGE?", file: "FILE", 
-        security_check: "SECURITY CHECK", link_preview: "VERIFY THE DESTINATION LINK"
+        security_check: "SECURITY CHECK", link_preview: "VERIFY THE DESTINATION LINK",
+        finish_match: "FINISH MATCH", choose_winner: "CHOOSE WINNER: ALPHA OR OMEGA?", match_finished: "MATCH FINISHED! TEAM WINS!",
+        wins: "WINS", losses: "LOSSES", to_next: "TO NEXT"
       },
       ru: {
-        discover: "ОБЗОР", create: "СОЗДАТЬ", profile: "ПРОФИЛЬ", wins: "ВИНРЕЙТ", hours: "ОНЛАЙН", 
+        discover: "ОБЗОР", create: "СОЗДАТЬ", profile: "ПРОФИЛЬ", exr: "EXR", hours: "ОНЛАЙН", 
         friends: "ДРУЗЬЯ", vacant: "СВОБОДНО", connect: "ПОДКЛЮЧИТЬСЯ", delete_event: "УДАЛИТЬ СОБЫТИЕ", 
         message: "СООБЩЕНИЕ...", nickname: "НИКНЕЙМ", password: "ПАРОЛЬ", login: "ВХОД", join: "РЕГИСТРАЦИЯ",
         change_name: "ИЗМЕНИТЬ ИМЯ", save: "СОХРАНИТЬ", cancel: "ОТМЕНА", social_link: "СОЦ. СЕТЬ", label: "НАЗВАНИЕ (DISCORD)",
@@ -95,9 +97,25 @@
         admin_sub: "АДМИНИСТРАТОР", pro_sub: "PRO ИГРОК", player_sub: "ИГРОК", copy: "КОПИР.",
         add_friend: "В ДРУЗЬЯ", sent: "ОТПРАВЛЕНО", accept: "ПРИНЯТЬ", chat: "ЧАТ", by: "ОТ", back: "НАЗАД",
         del_msg: "УДАЛИТЬ СООБЩЕНИЕ?", file: "ФАЙЛ",
-        security_check: "ПРОВЕРКА БЕЗОПАСНОСТИ", link_preview: "ПРОВЕРЬТЕ ССЫЛКУ ПЕРЕД ПЕРЕХОДОМ"
+        security_check: "ПРОВЕРКА БЕЗОПАСНОСТИ", link_preview: "ПРОВЕРЬТЕ ССЫЛКУ ПЕРЕД ПЕРЕХОДОМ",
+        finish_match: "ЗАВЕРШИТЬ МАТЧ", choose_winner: "ВЫБЕРИТЕ ПОБЕДИТЕЛЯ: ALPHA ИЛИ OMEGA?", match_finished: "МАТЧ ЗАВЕРШЕН! КОМАНДА ПОБЕДИЛА!",
+        wins: "ПОБЕД", losses: "ПОРАЖ", to_next: "ДО СЛЕД"
       }
     };
+
+    // Конфигурация уровней EXR
+    const EXR_LEVELS = [
+      { level: 1, name: "NV", min: 0, max: 500, label: "НОВИЧОК", labelEn: "NOVICE" },
+      { level: 2, name: "PR", min: 501, max: 750, label: "ПРОФИ", labelEn: "PRO" },
+      { level: 3, name: "EX", min: 751, max: 900, label: "ЭКСПЕРТ", labelEn: "EXPERT" },
+      { level: 4, name: "VG", min: 901, max: 1050, label: "ВЕТЕРАН", labelEn: "VETERAN" },
+      { level: 5, name: "EL", min: 1051, max: 1200, label: "ЭЛИТА", labelEn: "ELITE" },
+      { level: 6, name: "LG", min: 1201, max: 1300, label: "ЛЕГЕНДА", labelEn: "LEGEND" },
+      { level: 7, name: "IM", min: 1301, max: 1530, label: "ИММОРТАЛ", labelEn: "IMMORTAL" },
+      { level: 8, name: "GD", min: 1531, max: 1750, label: "ГРАНД", labelEn: "GRAND" },
+      { level: 9, name: "HM", min: 1751, max: 2000, label: "ХАРД", labelEn: "HARD" },
+      { level: 10, name: "ULT", min: 2001, max: Infinity, label: "УЛЬТРА", labelEn: "ULTRA" }
+    ];
 
     window.t = (key) => i18n[window.lang][key] || key;
 
@@ -109,6 +127,61 @@
 
     window.core = {
       u: null, userData: null, currentTid: null, tempCover: "",
+
+      // Функции для работы с EXR
+      getExrLevel(exr) {
+        for (const l of EXR_LEVELS) {
+          if (exr >= l.min && exr <= l.max) {
+            return l;
+          }
+        }
+        return EXR_LEVELS[0];
+      },
+
+      getExrProgress(exr) {
+        const level = this.getExrLevel(exr);
+        if (level.level === 10) return 100;
+        const range = level.max - level.min;
+        const progress = ((exr - level.min) / range) * 100;
+        return Math.min(100, Math.max(0, Math.floor(progress)));
+      },
+
+      getExrNext(exr) {
+        const level = this.getExrLevel(exr);
+        if (level.level === 10) return 0;
+        return level.max - exr;
+      },
+
+      getExrLevelName(level) {
+        return window.lang === 'ru' ? level.label : level.labelEn;
+      },
+
+      renderExrIcon(level, containerId) {
+        const container = document.getElementById(containerId);
+        if (!container) return;
+        
+        const points = Math.min(level, 10);
+        const width = 80;
+        const height = 50;
+        
+        let path = "";
+        let circles = "";
+        
+        for (let i = 0; i < points; i++) {
+          const x = 10 + (i * 14);
+          const y = 35 - (i % 2 === 0 ? 15 : 5);
+          if (i === 0) path += `M${x},${y}`;
+          else path += ` L${x},${y}`;
+          circles += `<circle cx="${x}" cy="${y}" r="${4 + i}" fill="currentColor"/>`;
+        }
+        
+        container.innerHTML = `
+          <svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" class="text-blue-500" style="filter: drop-shadow(0 0 10px currentColor);">
+            <path d="${path}" stroke="currentColor" stroke-width="3" fill="none" opacity="0.5"/>
+            ${circles}
+          </svg>
+        `;
+      },
 
       show(id, targetUid = null) {
         document.querySelectorAll('.section').forEach(s => s.classList.add('hidden'));
@@ -149,9 +222,25 @@
         return new Promise((res) => {
           const m = document.getElementById('confirm-modal');
           document.getElementById('confirm-text').innerText = txt.toUpperCase();
+          // Меняем текст кнопок для обычного подтверждения
+          document.getElementById('confirm-yes').innerText = window.lang === 'ru' ? 'ДА' : 'YES';
+          document.getElementById('confirm-no').innerText = window.lang === 'ru' ? 'НЕТ' : 'NO';
           m.classList.remove('hidden');
           document.getElementById('confirm-yes').onclick = () => { m.classList.add('hidden'); res(true); };
           document.getElementById('confirm-no').onclick = () => { m.classList.add('hidden'); res(false); };
+        });
+      },
+
+      async askWinner() {
+        return new Promise((res) => {
+          const m = document.getElementById('confirm-modal');
+          document.getElementById('confirm-text').innerText = window.t('choose_winner');
+          // Меняем текст кнопок для выбора победителя
+          document.getElementById('confirm-yes').innerText = 'ALPHA';
+          document.getElementById('confirm-no').innerText = 'OMEGA';
+          m.classList.remove('hidden');
+          document.getElementById('confirm-yes').onclick = () => { m.classList.add('hidden'); res('alpha'); };
+          document.getElementById('confirm-no').onclick = () => { m.classList.add('hidden'); res('omega'); };
         });
       },
 
@@ -457,7 +546,10 @@
 
       async showMini(uid) {
         const s = await get(ref(db, `users/${uid}`)), d = s.val(); if(!d) return;
-        const style = this.getUserStyle(d), wr = (d.wins + d.losses === 0) ? "0%" : (d.wins / (d.wins + d.losses) * 100).toFixed(0) + "%";
+        const style = this.getUserStyle(d);
+        const exr = d.exr || 0;
+        const level = this.getExrLevel(exr);
+        
         const fSnap = await get(ref(db, `friends/${this.u.uid}/${uid}`)), fStatus = fSnap.val();
         let friendBtn = '';
         if (uid !== this.u.uid) {
@@ -469,7 +561,8 @@
         let linksH = d.socials ? `<div class="flex flex-wrap gap-2 justify-center mb-6">${Object.values(d.socials).map(sl => `<a href="${sl.url}" target="_blank" class="bg-white/5 px-3 py-2 rounded-lg text-[7px] font-black text-blue-500 border border-white/5 uppercase">${sl.label}</a>`).join('')}</div>` : '';
         const isAdmin = this.userData?.isMaker || this.userData?.isAdmin;
         const banBtn = (isAdmin && !d.isMaker && uid !== this.u.uid) ? `<button onclick="core.toggleBan('${uid}', ${d.isBan || false})" class="mt-2 w-full py-4 ${d.isBan ? 'bg-green-600/20 text-green-500' : 'bg-red-600/20 text-red-500'} rounded-2xl text-[8px] font-black uppercase tracking-[0.3em]">${d.isBan ? 'UNBAN' : 'BAN'}</button>` : '';
-        document.getElementById('mini-content').innerHTML = `<div class="bg-[#0a0a0a] w-[320px] rounded-[3rem] overflow-hidden border ${d.isBan ? 'border-red-600' : 'border-white/10'} shadow-2xl relative"><div class="h-28 bg-zinc-900 bg-cover bg-center" style="background-image:url(${d.banner||''})"></div><div class="px-8 pb-10 text-center"><div class="w-20 h-20 mx-auto -mt-10 mb-4 bg-zinc-800 rounded-[2rem] border-[4px] border-[#0a0a0a] bg-cover bg-center" style="background-image:url(${d.avatar||''})"></div><h3 class="text-2xl font-black italic uppercase tracking-tighter ${style.class}">${d.name}</h3><p class="text-[7px] font-black opacity-40 tracking-[0.4em] mt-1 mb-4 text-white">${style.sub}</p><div class="flex items-center gap-3 bg-white/5 px-4 py-2 rounded-xl border border-white/5 mb-6"><div class="text-[10px] font-black text-blue-500 italic truncate flex-1">${uid}</div><button onclick="core.copyId('${uid}')" class="bg-white/10 px-3 py-1 rounded-lg text-[7px] font-black uppercase text-white active:scale-95">${window.t('copy')}</button></div>${linksH}<div class="grid grid-cols-2 gap-4 py-4 border-y border-white/5"><div><p class="text-white font-black italic text-xl">${wr}</p><p class="text-[6px] opacity-20 font-black uppercase text-white">${window.t('wins')}</p></div><div class="border-l border-white/5"><p class="text-white font-black italic text-xl">${this.formatHours(d.hours)}</p><p class="text-[6px] opacity-20 font-black uppercase text-white">${window.t('hours')}</p></div></div><div class="mt-6 flex flex-col gap-2">${friendBtn}${banBtn}<button onclick="document.getElementById('mini-modal').classList.add('hidden')" class="w-full py-4 bg-white/5 rounded-2xl text-[8px] font-black opacity-40 uppercase text-white">${window.t('close')}</button></div></div></div>`;
+        
+        document.getElementById('mini-content').innerHTML = `<div class="bg-[#0a0a0a] w-[320px] rounded-[3rem] overflow-hidden border ${d.isBan ? 'border-red-600' : 'border-white/10'} shadow-2xl relative"><div class="h-28 bg-zinc-900 bg-cover bg-center" style="background-image:url(${d.banner||''})"></div><div class="px-8 pb-10 text-center"><div class="w-20 h-20 mx-auto -mt-10 mb-4 bg-zinc-800 rounded-[2rem] border-[4px] border-[#0a0a0a] bg-cover bg-center" style="background-image:url(${d.avatar||''})"></div><h3 class="text-2xl font-black italic uppercase tracking-tighter ${style.class}">${d.name}</h3><p class="text-[7px] font-black opacity-40 tracking-[0.4em] mt-1 mb-4 text-white">${style.sub}</p><div class="flex items-center gap-3 bg-white/5 px-4 py-2 rounded-xl border border-white/5 mb-6"><div class="text-[10px] font-black text-blue-500 italic truncate flex-1">${uid}</div><button onclick="core.copyId('${uid}')" class="bg-white/10 px-3 py-1 rounded-lg text-[7px] font-black uppercase text-white active:scale-95">${window.t('copy')}</button></div>${linksH}<div class="grid grid-cols-2 gap-4 py-4 border-y border-white/5"><div><p class="text-blue-500 font-black italic text-xl">${exr}</p><p class="text-[6px] opacity-20 font-black uppercase text-white">EXR</p><div class="flex items-center justify-center gap-1 mt-1"><span class="text-[8px] font-black text-blue-500">${level.name}</span><span class="text-[6px] opacity-40 text-white">${this.getExrLevelName(level)}</span></div></div><div class="border-l border-white/5"><p class="text-white font-black italic text-xl">${this.formatHours(d.hours)}</p><p class="text-[6px] opacity-20 font-black uppercase text-white">${window.t('hours')}</p></div></div><div class="mt-4 w-full bg-white/5 h-1 rounded-full overflow-hidden"><div class="h-full bg-blue-500" style="width: ${this.getExrProgress(exr)}%"></div></div><div class="mt-6 flex flex-col gap-2">${friendBtn}${banBtn}<button onclick="document.getElementById('mini-modal').classList.add('hidden')" class="w-full py-4 bg-white/5 rounded-2xl text-[8px] font-black opacity-40 uppercase text-white">${window.t('close')}</button></div></div></div>`;
         document.getElementById('mini-modal').classList.remove('hidden');
       },
 
@@ -540,6 +633,79 @@
         box.innerHTML = h;
       },
 
+      async finishMatch(winner) {
+        if (!this.currentTid) return;
+        
+        const tSnap = await get(ref(db, `tourneys/${this.currentTid}`));
+        const t = tSnap.val();
+        
+        if (!t || t.status === 'finished') {
+          return this.notify("MATCH ALREADY FINISHED", "err");
+        }
+
+        const winnerTeam = winner === 'alpha' ? t.alpha : t.omega;
+        const loserTeam = winner === 'alpha' ? t.omega : t.alpha;
+
+        if (!winnerTeam || !loserTeam || Object.keys(winnerTeam).length === 0 || Object.keys(loserTeam).length === 0) {
+          return this.notify("TEAMS NOT FULL", "err");
+        }
+
+        this.notify(`РАСЧЕТ EXR...`);
+
+        // Начисляем EXR победителям (+25)
+        for (const uid of Object.keys(winnerTeam)) {
+          const userSnap = await get(ref(db, `users/${uid}`));
+          const userData = userSnap.val();
+          const currentExr = userData.exr || 0;
+          const newExr = currentExr + 25;
+          
+          console.log(`${userData.name}: ${currentExr} → ${newExr} (+25 EXR)`);
+          
+          await update(ref(db, `users/${uid}`), {
+            exr: newExr,
+            wins: increment(1)
+          });
+        }
+
+        // Начисляем EXR проигравшим (-15)
+        for (const uid of Object.keys(loserTeam)) {
+          const userSnap = await get(ref(db, `users/${uid}`));
+          const userData = userSnap.val();
+          const currentExr = userData.exr || 0;
+          const newExr = Math.max(0, currentExr - 15);
+          
+          console.log(`${userData.name}: ${currentExr} → ${newExr} (-15 EXR)`);
+          
+          await update(ref(db, `users/${uid}`), {
+            exr: newExr,
+            losses: increment(1)
+          });
+        }
+
+        // Удаляем турнир из базы
+        await remove(ref(db, `tourneys/${this.currentTid}`));
+        await remove(ref(db, `chats/${this.currentTid}`));
+
+        this.notify(`МАТЧ ЗАВЕРШЕН! EXR ОБНОВЛЕН`, 'success');
+        this.show('home');
+      },
+
+      async askFinish() {
+        const tSnap = await get(ref(db, `tourneys/${this.currentTid}`));
+        const t = tSnap.val();
+        
+        if (t.status === 'finished') {
+          return this.notify("MATCH ALREADY FINISHED", "err");
+        }
+
+        if (!t.alpha || !t.omega || Object.keys(t.alpha).length === 0 || Object.keys(t.omega).length === 0) {
+          return this.notify("BOTH TEAMS MUST HAVE PLAYERS", "err");
+        }
+
+        const winner = await this.askWinner();
+        await this.finishMatch(winner);
+      },
+
       async login() {
         const n = document.getElementById('an').value.toLowerCase().trim(), p = document.getElementById('ap').value;
         signInWithEmailAndPassword(auth, n + "@arena.exe", p).catch(() => this.notify(window.t('access_denied'), "err"));
@@ -548,7 +714,16 @@
       async register() {
         const n = document.getElementById('an').value.trim(), p = document.getElementById('ap').value;
         createUserWithEmailAndPassword(auth, n.toLowerCase() + "@arena.exe", p).then(async (c) => {
-            await set(ref(db, 'users/' + c.user.uid), { uid: c.user.uid, name: n.toUpperCase(), wins: 0, losses: 0, hours: 0, isMaker: false, isBan: false });
+            await set(ref(db, 'users/' + c.user.uid), { 
+              uid: c.user.uid, 
+              name: n.toUpperCase(), 
+              exr: 0,
+              wins: 0, 
+              losses: 0, 
+              hours: 0, 
+              isMaker: false, 
+              isBan: false 
+            });
         }).catch(() => this.notify(window.t('reg_err'), "err"));
       },
 
@@ -559,12 +734,50 @@
         onValue(uRef, (s) => {
           const d = s.val(); if(!d) return;
           const isMy = uid === this.u.uid, style = this.getUserStyle(d), banner = document.getElementById('p-banner');
+          const exr = d.exr || 0;
+          const level = this.getExrLevel(exr);
+          const nextExr = this.getExrNext(exr);
+          
           banner.style.backgroundImage = d.banner ? `url(${d.banner})` : 'none';
           if(isMy) { banner.onclick = () => document.getElementById('bi-set').click(); banner.classList.add('cursor-pointer'); }
           document.getElementById('p-avatar-wrap').innerHTML = `<div id="p-avatar" class="w-32 h-32 md:w-48 md:h-48 bg-zinc-800 border-[8px] border-[#060606] bg-cover bg-center rounded-[2.5rem] relative z-10" style="background-image:url(${d.avatar||''})" onclick="if(${isMy}) document.getElementById('ai-set').click()"></div>`;
           document.getElementById('p-name-container').innerHTML = `<div class="flex items-center gap-4 flex-wrap"><h2 class="text-4xl md:text-8xl font-black italic uppercase tracking-tighter ${style.class} leading-none">${d.name}</h2>${isMy ? `<button onclick="core.openEditName()" class="w-10 h-10 bg-white/5 border border-white/10 rounded-2xl flex items-center justify-center opacity-30 text-white">✎</button>` : ''}</div>`;
           document.getElementById('p-sub-container').innerHTML = `<div class="flex flex-col md:flex-row md:items-center gap-4 mt-4"><p class="text-[10px] font-black opacity-20 tracking-[0.5em] uppercase text-white">${style.sub}</p><div class="flex items-center gap-3 bg-white/5 px-4 py-2 rounded-xl border border-white/5 max-w-fit"><div class="text-[10px] font-black text-blue-500 italic truncate">${uid}</div><button onclick="core.copyId('${uid}')" class="bg-white/10 px-3 py-1 rounded-lg text-[7px] font-black uppercase text-white active:scale-95">${window.t('copy')}</button></div></div>`;
-          document.getElementById('p-wl').innerText = (d.wins + d.losses === 0) ? "0%" : (d.wins / (d.wins + d.losses) * 100).toFixed(0) + "%";
+          
+          // EXR блок с молнией возле цифр
+          document.getElementById('p-exr-container').innerHTML = `
+            <div class="bg-white/5 p-8 rounded-[2rem] border border-white/5 w-full relative overflow-visible">
+              <div class="flex items-center gap-4">
+                <div id="exr-mini-icon" class="flex-shrink-0"></div>
+                <div class="flex-grow">
+                  <div class="flex items-center justify-between">
+                    <div>
+                      <p class="text-5xl font-black text-blue-500">${exr}</p>
+                      <p class="text-[8px] font-black text-blue-500/50 uppercase">EXR</p>
+                    </div>
+                    <div class="text-right">
+                      <p class="text-3xl font-black text-blue-500">${level.name}</p>
+                      <p class="text-[8px] opacity-40 uppercase">${this.getExrLevelName(level)}</p>
+                    </div>
+                  </div>
+                  <div class="mt-6 w-full bg-white/5 h-3 rounded-full overflow-hidden">
+                    <div class="h-full bg-blue-500" style="width: ${this.getExrProgress(exr)}%"></div>
+                  </div>
+                  <div class="mt-2 text-right">
+                    <span class="text-[8px] opacity-40">${window.t('to_next')}: ${nextExr} EXR</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          `;
+          
+          // WINS и LOSSES
+          document.getElementById('p-wins').innerText = d.wins || 0;
+          document.getElementById('p-losses').innerText = d.losses || 0;
+          
+          // Рендерим иконку
+          setTimeout(() => this.renderExrIcon(level.level, 'exr-mini-icon'), 100);
+          
           document.getElementById('p-hours').innerText = this.formatHours(d.hours);
           const lb = document.getElementById('p-links'); lb.innerHTML = '';
           if(d.socials) Object.entries(d.socials).forEach(([id, sl]) => {
@@ -645,6 +858,21 @@
           ` : '';
           document.getElementById('ldesc').innerText = t.desc;
           document.getElementById('lobby-controls').innerHTML = isAdmin ? `<button onclick="core.deleteTourney('${tid}')" class="text-[9px] text-red-500 font-black uppercase opacity-30">${window.t('delete_event')}</button>` : '';
+          
+          // Кнопка завершения матча - появляется только когда в обеих командах есть игроки
+          const finishBtnContainer = document.getElementById('finish-btn-container');
+          if (isAdmin && t.alpha && t.omega && Object.keys(t.alpha).length > 0 && Object.keys(t.omega).length > 0) {
+            finishBtnContainer.innerHTML = `
+              <div class="w-full mt-6 mb-8">
+                <button onclick="core.askFinish()" class="w-full bg-red-600 py-8 rounded-2xl font-black text-[14px] uppercase tracking-widest text-white border-2 border-red-500 shadow-[0_0_30px_rgba(220,38,38,0.5)] hover:scale-[1.02] transition-all duration-300">
+                  ${window.t('finish_match')}
+                </button>
+              </div>
+            `;
+          } else {
+            finishBtnContainer.innerHTML = '';
+          }
+          
           this.renderTeam('alpha', t.alpha, t.format, t.status || 'open'); 
           this.renderTeam('omega', t.omega, t.format, t.status || 'open');
         });
@@ -775,10 +1003,27 @@
         <div class="p-8 md:p-16 pt-20 md:pt-24">
           <div id="p-name-container"></div><div id="p-sub-container"></div>
           <div class="grid grid-cols-1 md:grid-cols-3 gap-10 mt-16">
-            <div class="md:col-span-2 grid grid-cols-2 gap-4">
-              <div class="bg-white/5 p-6 md:p-12 text-center rounded-[2rem] border border-white/5"><p id="p-wl" class="text-blue-500 font-black italic stats-fit">0%</p><p class="text-[8px] opacity-30 uppercase mt-4 text-white" data-i18n="wins">WINRATE</p></div>
-              <div class="bg-white/5 p-6 md:p-12 text-center rounded-[2rem] border border-white/5"><p id="p-hours" class="text-white font-black italic stats-fit">0H</p><p class="text-[8px] opacity-30 uppercase mt-4 text-white" data-i18n="hours">ONLINE</p></div>
-              <div class="col-span-2"><div id="p-links"></div><div id="p-edit-controls" class="hidden"></div></div>
+            <div class="md:col-span-2">
+              <div class="grid grid-cols-2 gap-4">
+                <div id="p-exr-container" class="col-span-2"></div>
+                <div class="bg-white/5 p-8 text-center rounded-[2rem] border border-white/5 col-span-2">
+                  <p id="p-hours" class="text-white font-black italic stats-fit">0H</p>
+                  <p class="text-[8px] opacity-30 uppercase mt-4 text-white" data-i18n="hours">ONLINE</p>
+                </div>
+                <div class="col-span-2">
+                  <div class="grid grid-cols-2 gap-4">
+                    <div class="bg-white/5 p-8 rounded-[2rem] border border-white/5">
+                      <p class="text-blue-400 font-black text-3xl" id="p-wins">0</p>
+                      <p class="text-[8px] opacity-30 uppercase mt-2" data-i18n="wins">WINS</p>
+                    </div>
+                    <div class="bg-white/5 p-8 rounded-[2rem] border border-white/5">
+                      <p class="text-red-400 font-black text-3xl" id="p-losses">0</p>
+                      <p class="text-[8px] opacity-30 uppercase mt-2" data-i18n="losses">LOSSES</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="mt-8"><div id="p-links"></div><div id="p-edit-controls" class="hidden"></div></div>
             </div>
             <div>
               <div class="bg-white/5 p-8 rounded-[2.5rem] border border-white/5">
@@ -823,6 +1068,10 @@
           <div id="ln-container" class="flex items-center gap-4 flex-wrap mb-2"></div>
           <div id="l-owner" class="text-[9px] font-black uppercase tracking-[0.3em] mb-8 text-white"></div>
           <div class="flex items-center gap-6 mb-12"><p id="lp" class="text-blue-500 font-black text-[10px] uppercase tracking-widest"></p><div id="l-link-box"></div></div>
+          
+          <!-- Кнопка завершения матча - появляется только когда в обеих командах есть игроки -->
+          <div id="finish-btn-container" class="w-full"></div>
+          
           <div class="grid grid-cols-1 md:grid-cols-2 gap-8 mb-10"><div id="t-alpha"></div><div id="t-omega"></div></div>
           <div id="ldesc" class="bg-white/5 p-8 rounded-[1.5rem] text-[10px] opacity-40 uppercase text-white leading-relaxed"></div>
         </div>
@@ -838,7 +1087,13 @@
   </main>
 
   <div id="confirm-modal" class="fixed inset-0 z-[1000000] bg-black/95 flex items-center justify-center p-6 hidden">
-    <div class="bg-zinc-900 p-10 rounded-[3rem] border border-white/10 max-w-xs w-full text-center"><p id="confirm-text" class="text-[10px] font-black uppercase mb-8 text-white"></p><div class="grid grid-cols-2 gap-4"><button id="confirm-yes" class="bg-white text-black py-4 rounded-2xl font-black text-[10px] uppercase">YES</button><button id="confirm-no" class="bg-white/5 py-4 rounded-2xl font-black text-[10px] uppercase text-white">NO</button></div></div>
+    <div class="bg-zinc-900 p-10 rounded-[3rem] border border-white/10 max-w-xs w-full text-center">
+      <p id="confirm-text" class="text-[10px] font-black uppercase mb-8 text-white"></p>
+      <div class="grid grid-cols-2 gap-4">
+        <button id="confirm-yes" class="bg-blue-600 text-white py-4 rounded-2xl font-black text-[10px] uppercase"></button>
+        <button id="confirm-no" class="bg-red-600 py-4 rounded-2xl font-black text-[10px] uppercase text-white"></button>
+      </div>
+    </div>
   </div>
 
   <div id="security-modal" class="fixed inset-0 z-[1000000] bg-black/95 flex items-center justify-center p-6 hidden">
@@ -947,4 +1202,4 @@
     </div>
   </div>
 </body>
-						</html>
+</html>
