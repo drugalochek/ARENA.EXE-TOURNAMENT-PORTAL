@@ -38,6 +38,9 @@
     let mediaRecorder = null;
     let audioChunks = [];
     let editingTourneyId = null;
+    
+    // Для отслеживания онлайна
+    let onlineUsers = {};
 
     const msgIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>`;
 
@@ -70,7 +73,7 @@
         del_msg: "DELETE MESSAGE?", file: "FILE", 
         security_check: "SECURITY CHECK", link_preview: "VERIFY THE DESTINATION LINK",
         finish_match: "FINISH MATCH", choose_winner: "CHOOSE WINNER: ALPHA OR OMEGA?", match_finished: "MATCH FINISHED! TEAM WINS!",
-        wins: "WINS", losses: "LOSSES", to_next: "TO NEXT"
+        wins: "WINS", losses: "LOSSES", to_next: "TO NEXT", online: "ONLINE", offline: "OFFLINE"
       },
       ru: {
         discover: "ОБЗОР", create: "СОЗДАТЬ", profile: "ПРОФИЛЬ", exr: "EXR", hours: "ОНЛАЙН", 
@@ -99,7 +102,7 @@
         del_msg: "УДАЛИТЬ СООБЩЕНИЕ?", file: "ФАЙЛ",
         security_check: "ПРОВЕРКА БЕЗОПАСНОСТИ", link_preview: "ПРОВЕРЬТЕ ССЫЛКУ ПЕРЕД ПЕРЕХОДОМ",
         finish_match: "ЗАВЕРШИТЬ МАТЧ", choose_winner: "ВЫБЕРИТЕ ПОБЕДИТЕЛЯ: ALPHA ИЛИ OMEGA?", match_finished: "МАТЧ ЗАВЕРШЕН! КОМАНДА ПОБЕДИЛА!",
-        wins: "ПОБЕД", losses: "ПОРАЖ", to_next: "ДО СЛЕД"
+        wins: "ПОБЕД", losses: "ПОРАЖ", to_next: "ДО СЛЕД", online: "В СЕТИ", offline: "НЕ В СЕТИ"
       }
     };
 
@@ -181,6 +184,11 @@
             ${circles}
           </svg>
         `;
+      },
+
+      // Функция для проверки онлайн статуса
+      isUserOnline(uid) {
+        return onlineUsers[uid] === true;
       },
 
       show(id, targetUid = null) {
@@ -510,7 +518,24 @@
               const fSnap = await get(ref(db, `users/${fUid}`)), fData = fSnap.val();
               if (!fData) continue;
               const isP = status === 'pending_in';
-              listEl.innerHTML += `<div class="bg-white/5 p-4 rounded-2xl flex justify-between items-center mb-2 animate-slide"><div class="flex items-center gap-3 cursor-pointer" onclick="core.showMini('${fUid}')"><div class="w-8 h-8 rounded-lg bg-cover bg-center bg-zinc-800" style="background-image:url(${fData.avatar || ''})"></div><div><div class="text-[9px] font-black uppercase text-white">${fData.name}</div><div class="text-[6px] font-black opacity-30 uppercase text-white">${isP ? 'REQUEST' : 'FRIEND'}</div></div></div><div class="flex gap-1">${!isP ? `<button onclick="core.openDm('${fUid}', '${fData.name}')" class="bg-blue-600/20 text-blue-500 w-8 h-8 rounded-lg flex items-center justify-center">${msgIcon}</button>` : ''}${isP ? `<button onclick="core.addFriend('${fUid}')" class="bg-green-600/20 text-green-500 w-8 h-8 rounded-lg font-black text-[10px]">✓</button>` : ''}<button onclick="core.removeFriend('${fUid}')" class="bg-red-500/10 text-red-500/50 w-8 h-8 rounded-lg font-black text-[10px]">×</button></div></div>`;
+              const isOnline = this.isUserOnline(fUid);
+              listEl.innerHTML += `<div class="bg-white/5 p-4 rounded-2xl flex justify-between items-center mb-2 animate-slide">
+                <div class="flex items-center gap-3 cursor-pointer" onclick="core.showMini('${fUid}')">
+                  <div class="relative">
+                    <div class="w-8 h-8 rounded-lg bg-cover bg-center bg-zinc-800" style="background-image:url(${fData.avatar || ''})"></div>
+                    <div class="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border border-black ${isOnline ? 'bg-green-500' : 'bg-gray-500'}"></div>
+                  </div>
+                  <div>
+                    <div class="text-[9px] font-black uppercase text-white">${fData.name}</div>
+                    <div class="text-[6px] font-black opacity-30 uppercase text-white">${isP ? 'REQUEST' : 'FRIEND'}</div>
+                  </div>
+                </div>
+                <div class="flex gap-1">
+                  ${!isP ? `<button onclick="core.openDm('${fUid}', '${fData.name}')" class="bg-blue-600/20 text-blue-500 w-8 h-8 rounded-lg flex items-center justify-center">${msgIcon}</button>` : ''}
+                  ${isP ? `<button onclick="core.addFriend('${fUid}')" class="bg-green-600/20 text-green-500 w-8 h-8 rounded-lg font-black text-[10px]">✓</button>` : ''}
+                  <button onclick="core.removeFriend('${fUid}')" class="bg-red-500/10 text-red-500/50 w-8 h-8 rounded-lg font-black text-[10px]">×</button>
+                </div>
+              </div>`;
             }
           }
         });
@@ -561,6 +586,7 @@
         const exr = d.exr || 0;
         const level = this.getExrLevel(exr);
         const nextExr = this.getExrNext(exr);
+        const isOnline = this.isUserOnline(uid);
         
         const fSnap = await get(ref(db, `friends/${this.u.uid}/${uid}`)), fStatus = fSnap.val();
         let friendBtn = '';
@@ -580,7 +606,10 @@
         document.getElementById('mini-content').innerHTML = `<div class="bg-[#0a0a0a] w-[340px] rounded-[3rem] overflow-hidden border ${d.isBan ? 'border-red-600' : 'border-white/10'} shadow-2xl relative">
           <div class="h-28 bg-zinc-900 bg-cover bg-center" style="background-image:url(${d.banner||''})"></div>
           <div class="px-8 pb-10 text-center">
-            <div class="w-20 h-20 mx-auto -mt-10 mb-4 bg-zinc-800 rounded-[2rem] border-[4px] border-[#0a0a0a] bg-cover bg-center" style="background-image:url(${d.avatar||''})"></div>
+            <div class="relative inline-block">
+              <div class="w-20 h-20 mx-auto -mt-10 mb-4 bg-zinc-800 rounded-[2rem] border-[4px] border-[#0a0a0a] bg-cover bg-center" style="background-image:url(${d.avatar||''})"></div>
+              <div class="absolute bottom-2 right-2 w-4 h-4 rounded-full border-2 border-[#0a0a0a] ${isOnline ? 'bg-green-500' : 'bg-gray-500'}"></div>
+            </div>
             <h3 class="text-2xl font-black italic uppercase tracking-tighter ${style.class}">${d.name}</h3>
             <p class="text-[7px] font-black opacity-40 tracking-[0.4em] mt-1 mb-4 text-white">${style.sub}</p>
             <div class="flex items-center gap-3 bg-white/5 px-4 py-2 rounded-xl border border-white/5 mb-6">
@@ -704,7 +733,16 @@
         if(p) {
           for (const [uid, name] of Object.entries(p)) {
             const s = await get(ref(db, `users/${uid}`)), st = this.getUserStyle(s.val());
-            h += `<div onclick="core.showMini('${uid}')" class="relative bg-white/5 p-5 border-l-4 ${side==='alpha'?'border-blue-600':'border-red-600'} mb-3 text-xs font-black uppercase italic rounded-[1.2rem] flex justify-between items-center"><span class="${st.class}">${name}</span>${uid === this.u.uid && status === 'open' ? `<div onclick="event.stopPropagation(); core.leaveTeam('${side}')" class="bg-red-500/10 text-red-500 px-3 py-1 rounded-lg text-[7px] border border-red-500/20 font-black">LEAVE</div>` : ''}</div>`;
+            const isOnline = this.isUserOnline(uid);
+            h += `<div onclick="core.showMini('${uid}')" class="relative bg-white/5 p-5 border-l-4 ${side==='alpha'?'border-blue-600':'border-red-600'} mb-3 text-xs font-black uppercase italic rounded-[1.2rem] flex justify-between items-center">
+              <div class="flex items-center gap-2">
+                <div class="relative">
+                  <div class="w-2 h-2 rounded-full ${isOnline ? 'bg-green-500' : 'bg-gray-500'}"></div>
+                </div>
+                <span class="${st.class}">${name}</span>
+              </div>
+              ${uid === this.u.uid && status === 'open' ? `<div onclick="event.stopPropagation(); core.leaveTeam('${side}')" class="bg-red-500/10 text-red-500 px-3 py-1 rounded-lg text-[7px] border border-red-500/20 font-black">LEAVE</div>` : ''}
+            </div>`;
           }
         }
         for(let i=count; i<limit; i++) h += `<div onclick="core.join('${side}')" class="border border-dashed border-white/5 p-5 mb-3 text-center opacity-20 text-[8px] font-black uppercase cursor-pointer rounded-[1.2rem] hover:opacity-100 text-white">${window.t('vacant')}</div>`;
@@ -819,10 +857,19 @@
           const exr = d.exr || 0;
           const level = this.getExrLevel(exr);
           const nextExr = this.getExrNext(exr);
+          const isOnline = this.isUserOnline(uid);
           
           banner.style.backgroundImage = d.banner ? `url(${d.banner})` : 'none';
           if(isMy) { banner.onclick = () => document.getElementById('bi-set').click(); banner.classList.add('cursor-pointer'); }
-          document.getElementById('p-avatar-wrap').innerHTML = `<div id="p-avatar" class="w-32 h-32 md:w-48 md:h-48 bg-zinc-800 border-[8px] border-[#060606] bg-cover bg-center rounded-[2.5rem] relative z-10" style="background-image:url(${d.avatar||''})" onclick="if(${isMy}) document.getElementById('ai-set').click()"></div>`;
+          
+          // Аватарка с индикатором онлайн
+          document.getElementById('p-avatar-wrap').innerHTML = `
+            <div class="relative inline-block">
+              <div id="p-avatar" class="w-32 h-32 md:w-48 md:h-48 bg-zinc-800 border-[8px] border-[#060606] bg-cover bg-center rounded-[2.5rem] relative z-10" style="background-image:url(${d.avatar||''})" onclick="if(${isMy}) document.getElementById('ai-set').click()"></div>
+              <div class="absolute bottom-2 right-2 w-5 h-5 md:w-6 md:h-6 rounded-full border-2 border-[#060606] ${isOnline ? 'bg-green-500' : 'bg-gray-500'}"></div>
+            </div>
+          `;
+          
           document.getElementById('p-name-container').innerHTML = `<div class="flex items-center gap-4 flex-wrap"><h2 class="text-4xl md:text-8xl font-black italic uppercase tracking-tighter ${style.class} leading-none">${d.name}</h2>${isMy ? `<button onclick="core.openEditName()" class="w-10 h-10 bg-white/5 border border-white/10 rounded-2xl flex items-center justify-center opacity-30 text-white">✎</button>` : ''}</div>`;
           document.getElementById('p-sub-container').innerHTML = `<div class="flex flex-col md:flex-row md:items-center gap-4 mt-4"><p class="text-[10px] font-black opacity-20 tracking-[0.5em] uppercase text-white">${style.sub}</p><div class="flex items-center gap-3 bg-white/5 px-4 py-2 rounded-xl border border-white/5 max-w-fit"><div class="text-[10px] font-black text-blue-500 italic truncate">${uid}</div><button onclick="core.copyId('${uid}')" class="bg-white/10 px-3 py-1 rounded-lg text-[7px] font-black uppercase text-white active:scale-95">${window.t('copy')}</button></div></div>`;
           
@@ -961,6 +1008,41 @@
       }
     };
 
+    // Инициализация отслеживания онлайна
+    function initOnlineTracking() {
+      const presenceRef = ref(db, '.info/connected');
+      onValue(presenceRef, (snap) => {
+        if (snap.val() === true) {
+          const user = auth.currentUser;
+          if (user) {
+            const userStatusRef = ref(db, `status/${user.uid}`);
+            set(userStatusRef, {
+              online: true,
+              lastSeen: Date.now()
+            });
+            
+            // При отключении
+            onDisconnect(userStatusRef).set({
+              online: false,
+              lastSeen: Date.now()
+            });
+          }
+        }
+      });
+
+      // Следим за статусами всех пользователей
+      const statusRef = ref(db, 'status');
+      onValue(statusRef, (snap) => {
+        const statuses = snap.val() || {};
+        onlineUsers = {};
+        Object.keys(statuses).forEach(uid => {
+          if (statuses[uid].online === true) {
+            onlineUsers[uid] = true;
+          }
+        });
+      });
+    }
+
     onAuthStateChanged(auth, (user) => {
       if(user) {
         onValue(ref(db, `users/${user.uid}`), (s) => {
@@ -970,6 +1052,7 @@
           document.getElementById('nav-avatar').style.backgroundImage = d?.avatar ? `url(${d.avatar})` : 'none';
           if(!siteInterval) siteInterval = setInterval(() => { update(ref(db, `users/${user.uid}`), { hours: increment(1) }); }, 60000);
           window.core.initGlobalListeners(); window.core.loadList();
+          initOnlineTracking(); // Запускаем отслеживание онлайна
         });
       } else { document.getElementById('auth-screen').classList.remove('hidden'); if(siteInterval) { clearInterval(siteInterval); siteInterval = null; } }
     });
@@ -1151,7 +1234,7 @@
           <div id="l-owner" class="text-[9px] font-black uppercase tracking-[0.3em] mb-8 text-white"></div>
           <div class="flex items-center gap-6 mb-12"><p id="lp" class="text-blue-500 font-black text-[10px] uppercase tracking-widest"></p><div id="l-link-box"></div></div>
           
-          <!-- Кнопка завершения матча - появляется только когда в обеих командах есть игроки -->
+          <!-- Кнопка завершения матча -->
           <div id="finish-btn-container" class="w-full"></div>
           
           <div class="grid grid-cols-1 md:grid-cols-2 gap-8 mb-10"><div id="t-alpha"></div><div id="t-omega"></div></div>
@@ -1285,4 +1368,4 @@
     </div>
   </div>
 </body>
-</html>
+  </html>
