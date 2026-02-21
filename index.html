@@ -9,7 +9,7 @@
   <script src="https://yastatic.net/taxi-widget/ya-taxi-widget-v2.js"></script>
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
-    import { getDatabase, ref, set, update, get, push, onValue, off, remove, increment, limitToLast, query, orderByChild, equalTo, onChildAdded } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-database.js";
+    import { getDatabase, ref, set, update, get, push, onValue, off, remove, increment, limitToLast, query, orderByChild, equalTo, onChildAdded, onDisconnect } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-database.js";
     import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, setPersistence, browserLocalPersistence, signOut } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
 
     const firebaseConfig = {
@@ -230,7 +230,6 @@
         return new Promise((res) => {
           const m = document.getElementById('confirm-modal');
           document.getElementById('confirm-text').innerText = txt.toUpperCase();
-          // Показываем две кнопки для подтверждения
           document.getElementById('confirm-yes').classList.remove('hidden');
           document.getElementById('confirm-no').classList.remove('hidden');
           document.getElementById('confirm-cancel').classList.add('hidden');
@@ -247,7 +246,6 @@
         return new Promise((res) => {
           const m = document.getElementById('confirm-modal');
           document.getElementById('confirm-text').innerText = window.t('choose_winner');
-          // Показываем три кнопки для выбора победителя
           document.getElementById('confirm-yes').classList.remove('hidden');
           document.getElementById('confirm-no').classList.remove('hidden');
           document.getElementById('confirm-cancel').classList.remove('hidden');
@@ -523,7 +521,7 @@
                 <div class="flex items-center gap-3 cursor-pointer" onclick="core.showMini('${fUid}')">
                   <div class="relative">
                     <div class="w-8 h-8 rounded-lg bg-cover bg-center bg-zinc-800" style="background-image:url(${fData.avatar || ''})"></div>
-                    <div class="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border border-black ${isOnline ? 'bg-green-500' : 'bg-gray-500'}"></div>
+                    <div class="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border border-black ${isOnline ? 'bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.8)]' : 'bg-gray-500'}"></div>
                   </div>
                   <div>
                     <div class="text-[9px] font-black uppercase text-white">${fData.name}</div>
@@ -600,7 +598,6 @@
         const isAdmin = this.userData?.isMaker || this.userData?.isAdmin;
         const banBtn = (isAdmin && !d.isMaker && uid !== this.u.uid) ? `<button onclick="core.toggleBan('${uid}', ${d.isBan || false})" class="mt-2 w-full py-4 ${d.isBan ? 'bg-green-600/20 text-green-500' : 'bg-red-600/20 text-red-500'} rounded-2xl text-[8px] font-black uppercase tracking-[0.3em]">${d.isBan ? 'UNBAN' : 'BAN'}</button>` : '';
         
-        // Уникальный ID для иконки в мини-профиле
         const iconId = 'mini-exr-icon-' + Math.random().toString(36).substr(2, 9);
         
         document.getElementById('mini-content').innerHTML = `<div class="bg-[#0a0a0a] w-[340px] rounded-[3rem] overflow-hidden border ${d.isBan ? 'border-red-600' : 'border-white/10'} shadow-2xl relative">
@@ -608,7 +605,7 @@
           <div class="px-8 pb-10 text-center">
             <div class="relative inline-block">
               <div class="w-20 h-20 mx-auto -mt-10 mb-4 bg-zinc-800 rounded-[2rem] border-[4px] border-[#0a0a0a] bg-cover bg-center" style="background-image:url(${d.avatar||''})"></div>
-              <div class="absolute bottom-2 right-2 w-4 h-4 rounded-full border-2 border-[#0a0a0a] ${isOnline ? 'bg-green-500' : 'bg-gray-500'}"></div>
+              <div class="absolute bottom-2 right-2 w-4 h-4 rounded-full border-2 border-[#0a0a0a] ${isOnline ? 'bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.8)]' : 'bg-gray-500'}"></div>
             </div>
             <h3 class="text-2xl font-black italic uppercase tracking-tighter ${style.class}">${d.name}</h3>
             <p class="text-[7px] font-black opacity-40 tracking-[0.4em] mt-1 mb-4 text-white">${style.sub}</p>
@@ -669,7 +666,6 @@
         
         document.getElementById('mini-modal').classList.remove('hidden');
         
-        // Рендерим иконку после добавления в DOM
         setTimeout(() => this.renderExrIcon(level.level, iconId), 50);
       },
 
@@ -737,7 +733,7 @@
             h += `<div onclick="core.showMini('${uid}')" class="relative bg-white/5 p-5 border-l-4 ${side==='alpha'?'border-blue-600':'border-red-600'} mb-3 text-xs font-black uppercase italic rounded-[1.2rem] flex justify-between items-center">
               <div class="flex items-center gap-2">
                 <div class="relative">
-                  <div class="w-2 h-2 rounded-full ${isOnline ? 'bg-green-500' : 'bg-gray-500'}"></div>
+                  <div class="w-2 h-2 rounded-full ${isOnline ? 'bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.8)]' : 'bg-gray-500'}"></div>
                 </div>
                 <span class="${st.class}">${name}</span>
               </div>
@@ -750,7 +746,7 @@
       },
 
       async finishMatch(winner) {
-        if (!winner) return; // Если нажали ОТМЕНА
+        if (!winner) return;
         
         if (!this.currentTid) return;
         
@@ -770,14 +766,11 @@
 
         this.notify(`РАСЧЕТ EXR...`);
 
-        // Начисляем EXR победителям (+25)
         for (const uid of Object.keys(winnerTeam)) {
           const userSnap = await get(ref(db, `users/${uid}`));
           const userData = userSnap.val();
           const currentExr = userData.exr || 0;
           const newExr = currentExr + 25;
-          
-          console.log(`${userData.name}: ${currentExr} → ${newExr} (+25 EXR)`);
           
           await update(ref(db, `users/${uid}`), {
             exr: newExr,
@@ -785,14 +778,11 @@
           });
         }
 
-        // Начисляем EXR проигравшим (-15)
         for (const uid of Object.keys(loserTeam)) {
           const userSnap = await get(ref(db, `users/${uid}`));
           const userData = userSnap.val();
           const currentExr = userData.exr || 0;
           const newExr = Math.max(0, currentExr - 15);
-          
-          console.log(`${userData.name}: ${currentExr} → ${newExr} (-15 EXR)`);
           
           await update(ref(db, `users/${uid}`), {
             exr: newExr,
@@ -800,7 +790,6 @@
           });
         }
 
-        // Удаляем турнир из базы
         await remove(ref(db, `tourneys/${this.currentTid}`));
         await remove(ref(db, `chats/${this.currentTid}`));
 
@@ -821,7 +810,7 @@
         }
 
         const winner = await this.askWinner();
-        if (winner) { // Если не отмена
+        if (winner) {
           await this.finishMatch(winner);
         }
       },
@@ -842,7 +831,8 @@
               losses: 0, 
               hours: 0, 
               isMaker: false, 
-              isBan: false 
+              isBan: false,
+              lastSeen: Date.now()
             });
         }).catch(() => this.notify(window.t('reg_err'), "err"));
       },
@@ -862,18 +852,16 @@
           banner.style.backgroundImage = d.banner ? `url(${d.banner})` : 'none';
           if(isMy) { banner.onclick = () => document.getElementById('bi-set').click(); banner.classList.add('cursor-pointer'); }
           
-          // Аватарка с индикатором онлайн
           document.getElementById('p-avatar-wrap').innerHTML = `
             <div class="relative inline-block">
               <div id="p-avatar" class="w-32 h-32 md:w-48 md:h-48 bg-zinc-800 border-[8px] border-[#060606] bg-cover bg-center rounded-[2.5rem] relative z-10" style="background-image:url(${d.avatar||''})" onclick="if(${isMy}) document.getElementById('ai-set').click()"></div>
-              <div class="absolute bottom-2 right-2 w-5 h-5 md:w-6 md:h-6 rounded-full border-2 border-[#060606] ${isOnline ? 'bg-green-500' : 'bg-gray-500'}"></div>
+              <div class="absolute bottom-2 right-2 w-5 h-5 md:w-6 md:h-6 rounded-full border-2 border-[#060606] ${isOnline ? 'bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.8)]' : 'bg-gray-500'}"></div>
             </div>
           `;
           
           document.getElementById('p-name-container').innerHTML = `<div class="flex items-center gap-4 flex-wrap"><h2 class="text-4xl md:text-8xl font-black italic uppercase tracking-tighter ${style.class} leading-none">${d.name}</h2>${isMy ? `<button onclick="core.openEditName()" class="w-10 h-10 bg-white/5 border border-white/10 rounded-2xl flex items-center justify-center opacity-30 text-white">✎</button>` : ''}</div>`;
           document.getElementById('p-sub-container').innerHTML = `<div class="flex flex-col md:flex-row md:items-center gap-4 mt-4"><p class="text-[10px] font-black opacity-20 tracking-[0.5em] uppercase text-white">${style.sub}</p><div class="flex items-center gap-3 bg-white/5 px-4 py-2 rounded-xl border border-white/5 max-w-fit"><div class="text-[10px] font-black text-blue-500 italic truncate">${uid}</div><button onclick="core.copyId('${uid}')" class="bg-white/10 px-3 py-1 rounded-lg text-[7px] font-black uppercase text-white active:scale-95">${window.t('copy')}</button></div></div>`;
           
-          // EXR блок с молнией возле цифр
           document.getElementById('p-exr-container').innerHTML = `
             <div class="bg-white/5 p-8 rounded-[2rem] border border-white/5 w-full relative overflow-visible">
               <div class="flex items-center gap-4">
@@ -900,11 +888,9 @@
             </div>
           `;
           
-          // WINS и LOSSES
           document.getElementById('p-wins').innerText = d.wins || 0;
           document.getElementById('p-losses').innerText = d.losses || 0;
           
-          // Рендерим иконку
           setTimeout(() => this.renderExrIcon(level.level, 'exr-mini-icon'), 100);
           
           document.getElementById('p-hours').innerText = this.formatHours(d.hours);
@@ -988,7 +974,6 @@
           document.getElementById('ldesc').innerText = t.desc;
           document.getElementById('lobby-controls').innerHTML = isAdmin ? `<button onclick="core.deleteTourney('${tid}')" class="text-[9px] text-red-500 font-black uppercase opacity-30">${window.t('delete_event')}</button>` : '';
           
-          // Кнопка завершения матча - появляется только когда в обеих командах есть игроки
           const finishBtnContainer = document.getElementById('finish-btn-container');
           if (isAdmin && t.alpha && t.omega && Object.keys(t.alpha).length > 0 && Object.keys(t.omega).length > 0) {
             finishBtnContainer.innerHTML = `
@@ -1008,53 +993,94 @@
       }
     };
 
-    // Инициализация отслеживания онлайна
+    // ========== ПРОСТАЯ РАБОЧАЯ СИСТЕМА ОНЛАЙНА ==========
     function initOnlineTracking() {
-      const presenceRef = ref(db, '.info/connected');
-      onValue(presenceRef, (snap) => {
+      const user = auth.currentUser;
+      if (!user) return;
+
+      const userStatusRef = ref(db, `status/${user.uid}`);
+      
+      // При подключении к Firebase
+      const connectedRef = ref(db, '.info/connected');
+      onValue(connectedRef, (snap) => {
         if (snap.val() === true) {
-          const user = auth.currentUser;
-          if (user) {
-            const userStatusRef = ref(db, `status/${user.uid}`);
-            set(userStatusRef, {
-              online: true,
-              lastSeen: Date.now()
-            });
-            
-            // При отключении
-            onDisconnect(userStatusRef).set({
-              online: false,
-              lastSeen: Date.now()
-            });
-          }
+          // Устанавливаем онлайн статус
+          set(userStatusRef, {
+            online: true,
+            lastSeen: Date.now()
+          }).catch(() => {});
+          
+          // При отключении
+          onDisconnect(userStatusRef).set({
+            online: false,
+            lastSeen: Date.now()
+          });
         }
       });
 
-      // Следим за статусами всех пользователей
+      // При выходе со страницы
+      window.addEventListener('beforeunload', () => {
+        set(userStatusRef, {
+          online: false,
+          lastSeen: Date.now()
+        }).catch(() => {});
+      });
+    }
+
+    // Следим за статусами всех пользователей
+    function trackOnlineStatus() {
       const statusRef = ref(db, 'status');
       onValue(statusRef, (snap) => {
         const statuses = snap.val() || {};
         onlineUsers = {};
+        
         Object.keys(statuses).forEach(uid => {
-          if (statuses[uid].online === true) {
+          if (statuses[uid]?.online === true) {
             onlineUsers[uid] = true;
           }
         });
+        
+        // Обновляем UI если нужно
+        if (window.core?.currentTid) {
+          window.core.openLobby(window.core.currentTid);
+        }
+        if (window.core?.u?.uid) {
+          window.core.renderProfile(window.core.u.uid);
+        }
       });
     }
 
     onAuthStateChanged(auth, (user) => {
       if(user) {
         onValue(ref(db, `users/${user.uid}`), (s) => {
-          const d = s.val(); if (d && d.isBan) { signOut(auth).then(() => { localStorage.clear(); location.reload(); }); return; }
-          window.core.u = user; window.core.userData = d;
+          const d = s.val(); if (d && d.isBan) { 
+            signOut(auth).then(() => { 
+              localStorage.clear(); 
+              location.reload(); 
+            }); 
+            return; 
+          }
+          window.core.u = user; 
+          window.core.userData = d;
           document.getElementById('auth-screen').classList.add('hidden');
           document.getElementById('nav-avatar').style.backgroundImage = d?.avatar ? `url(${d.avatar})` : 'none';
-          if(!siteInterval) siteInterval = setInterval(() => { update(ref(db, `users/${user.uid}`), { hours: increment(1) }); }, 60000);
-          window.core.initGlobalListeners(); window.core.loadList();
-          initOnlineTracking(); // Запускаем отслеживание онлайна
+          if(!siteInterval) siteInterval = setInterval(() => { 
+            update(ref(db, `users/${user.uid}`), { hours: increment(1) }); 
+          }, 60000);
+          window.core.initGlobalListeners(); 
+          window.core.loadList();
+          
+          // Запускаем отслеживание онлайна
+          initOnlineTracking();
+          trackOnlineStatus();
         });
-      } else { document.getElementById('auth-screen').classList.remove('hidden'); if(siteInterval) { clearInterval(siteInterval); siteInterval = null; } }
+      } else { 
+        document.getElementById('auth-screen').classList.remove('hidden'); 
+        if(siteInterval) { 
+          clearInterval(siteInterval); 
+          siteInterval = null; 
+        }
+      }
     });
 
     document.addEventListener('DOMContentLoaded', () => {
@@ -1366,5 +1392,6 @@
         </button>
       </div>
     </div>
-  </body>
-  </html>
+  </div>
+</body>
+          </html>
