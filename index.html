@@ -764,7 +764,7 @@
           return this.notify("TEAMS NOT FULL", "err");
         }
 
-        this.notify(`РАСЧЕТ EXR...`);
+        this.notify(`CALCULATION EXR...`);
 
         for (const uid of Object.keys(winnerTeam)) {
           const userSnap = await get(ref(db, `users/${uid}`));
@@ -793,7 +793,7 @@
         await remove(ref(db, `tourneys/${this.currentTid}`));
         await remove(ref(db, `chats/${this.currentTid}`));
 
-        this.notify(`МАТЧ ЗАВЕРШЕН! EXR ОБНОВЛЕН`, 'success');
+        this.notify(`THE MATCH IS OVER! EXR UPDATE`, 'success');
         this.show('home');
       },
 
