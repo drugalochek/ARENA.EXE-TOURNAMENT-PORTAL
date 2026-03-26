@@ -40,8 +40,12 @@
     let audioChunks = [];
     let editingTourneyId = null;
     let onlineUsers = {};
+    let pendingReportTarget = null;
+    let pendingEditMsgId = null;
 
     const msgIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>`;
+    const editIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3l4 4-7 7H10v-4l7-7z"/><path d="M4 20h16"/></svg>`;
+    const deleteIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 4V2h8v2"/></svg>`;
 
     window.lang = localStorage.getItem('arena_lang') || 'en';
     const i18n = {
@@ -69,14 +73,15 @@
         terminated_sub: "BANNED", founder_sub: "FOUNDER / CEO", elite_sub: "ELITE ADMIN", 
         admin_sub: "ADMINISTRATOR", pro_sub: "PRO PLAYER", player_sub: "PLAYER", copy: "COPY",
         add_friend: "ADD FRIEND", sent: "SENT", accept: "ACCEPT", chat: "CHAT", by: "BY", back: "BACK",
-        del_msg: "DELETE MESSAGE?", file: "FILE", 
+        del_msg: "DELETE", edit_msg: "EDIT", file: "FILE", 
         security_check: "SECURITY CHECK", link_preview: "VERIFY THE DESTINATION LINK",
         finish_match: "FINISH MATCH", choose_winner: "CHOOSE WINNER: ALPHA OR OMEGA?", match_finished: "MATCH FINISHED! TEAM WINS!",
         wins: "WINS", losses: "LOSSES", to_next: "TO NEXT", online: "ONLINE", offline: "OFFLINE",
         users: "USERS", tournaments: "TOURNAMENTS", reports: "REPORTS", logs: "LOGS", mod_chat: "MOD CHAT",
         ban: "BAN", unban: "UNBAN", make_admin: "MAKE ADMIN", make_pro: "MAKE PRO", remove_admin: "REMOVE ADMIN", remove_pro: "REMOVE PRO",
         report_reason: "REPORT REASON", submit_report: "SUBMIT REPORT", no_reports: "NO REPORTS", 
-        mod_actions: "MOD ACTIONS", force_finish: "FORCE FINISH", close_reg: "CLOSE REG"
+        mod_actions: "MOD ACTIONS", force_finish: "FORCE FINISH", close_reg: "CLOSE REG", copy_id: "COPY ID",
+        report_title: "REPORT PLAYER", report_placeholder: "Describe the reason...", edit_title: "EDIT MESSAGE"
       },
       ru: {
         discover: "ОБЗОР", create: "СОЗДАТЬ", profile: "ПРОФИЛЬ", mod: "МОД", exr: "EXR", hours: "ОНЛАЙН", 
@@ -102,14 +107,15 @@
         terminated_sub: "ЗАБЛОКИРОВАН", founder_sub: "ОСНОВАТЕЛЬ / CEO", elite_sub: "ELITE АДМИН", 
         admin_sub: "АДМИНИСТРАТОР", pro_sub: "PRO ИГРОК", player_sub: "ИГРОК", copy: "КОПИР.",
         add_friend: "В ДРУЗЬЯ", sent: "ОТПРАВЛЕНО", accept: "ПРИНЯТЬ", chat: "ЧАТ", by: "ОТ", back: "НАЗАД",
-        del_msg: "УДАЛИТЬ СООБЩЕНИЕ?", file: "ФАЙЛ",
+        del_msg: "УДАЛИТЬ", edit_msg: "РЕД.", file: "ФАЙЛ",
         security_check: "ПРОВЕРКА БЕЗОПАСНОСТИ", link_preview: "ПРОВЕРЬТЕ ССЫЛКУ ПЕРЕД ПЕРЕХОДОМ",
         finish_match: "ЗАВЕРШИТЬ МАТЧ", choose_winner: "ВЫБЕРИТЕ ПОБЕДИТЕЛЯ: ALPHA ИЛИ OMEGA?", match_finished: "МАТЧ ЗАВЕРШЕН! КОМАНДА ПОБЕДИЛА!",
         wins: "ПОБЕД", losses: "ПОРАЖ", to_next: "ДО СЛЕД", online: "В СЕТИ", offline: "НЕ В СЕТИ",
         users: "ПОЛЬЗОВАТЕЛИ", tournaments: "ТУРНИРЫ", reports: "ЖАЛОБЫ", logs: "ЛОГИ", mod_chat: "ЧАТ МОДОВ",
         ban: "ЗАБАНИТЬ", unban: "РАЗБАНИТЬ", make_admin: "СДЕЛАТЬ АДМИНОМ", make_pro: "СДЕЛАТЬ PRO", remove_admin: "УБРАТЬ АДМИНА", remove_pro: "УБРАТЬ PRO",
         report_reason: "ПРИЧИНА ЖАЛОБЫ", submit_report: "ОТПРАВИТЬ ЖАЛОБУ", no_reports: "НЕТ ЖАЛОБ", 
-        mod_actions: "ДЕЙСТВИЯ МОДЕРАТОРА", force_finish: "ПРИНУДИТЕЛЬНО ЗАВЕРШИТЬ", close_reg: "ЗАКРЫТЬ РЕГ."
+        mod_actions: "ДЕЙСТВИЯ МОДЕРАТОРА", force_finish: "ПРИНУДИТЕЛЬНО ЗАВЕРШИТЬ", close_reg: "ЗАКРЫТЬ РЕГ.", copy_id: "КОПИ ID",
+        report_title: "ПОЖАЛОВАТЬСЯ", report_placeholder: "Опишите причину...", edit_title: "РЕДАКТИРОВАТЬ"
       }
     };
 
@@ -127,43 +133,27 @@
     ];
 
     window.t = (key) => i18n[window.lang][key] || key;
+    window.toggleLang = () => { window.lang = window.lang === 'en' ? 'ru' : 'en'; localStorage.setItem('arena_lang', window.lang); location.reload(); };
 
-    window.toggleLang = () => {
-      window.lang = window.lang === 'en' ? 'ru' : 'en';
-      localStorage.setItem('arena_lang', window.lang);
-      location.reload();
-    };
-
-    // ========== СИСТЕМА АВТОСНЯТИЯ PRO ЧЕРЕЗ 30 ДНЕЙ ==========
+    // PRO auto-expire (30 дней)
     const PRO_DURATION_DAYS = 30;
-
     async function checkAndExpireProRoles() {
       const usersSnap = await get(ref(db, 'users'));
       const users = usersSnap.val() || {};
-      
       for (const [uid, data] of Object.entries(users)) {
-        if (data.isPro && !data.isMaker && !data.isAdmin && data.proGrantedAt) {
-          const daysPassed = (Date.now() - data.proGrantedAt) / (1000 * 60 * 60 * 24);
-          if (daysPassed >= PRO_DURATION_DAYS) {
+        if (data.isPro && !data.isMaker && data.proGrantedAt) {
+          if ((Date.now() - data.proGrantedAt) / (1000 * 60 * 60 * 24) >= PRO_DURATION_DAYS) {
             await update(ref(db, `users/${uid}`), { isPro: false, proGrantedAt: null });
-            await push(ref(db, 'mod_logs'), {
-              uid: 'system', adminName: 'SYSTEM', action: 'AUTO_EXPIRE_PRO',
-              targetUid: uid, targetName: data.name,
-              details: `PRO expired after ${PRO_DURATION_DAYS} days`, timestamp: Date.now()
-            });
+            await push(ref(db, 'mod_logs'), { uid: 'system', adminName: 'SYSTEM', action: 'AUTO_EXPIRE_PRO', targetUid: uid, targetName: data.name, details: `PRO expired after ${PRO_DURATION_DAYS} days`, timestamp: Date.now() });
           }
         }
       }
     }
-
     setInterval(() => { if (window.core?.userData?.isMaker) checkAndExpireProRoles(); }, 60 * 60 * 1000);
 
     async function addModLog(action, targetUid = null, targetName = null, details = null) {
       if (!window.core?.u?.uid) return;
-      await push(ref(db, 'mod_logs'), {
-        uid: window.core.u.uid, adminName: window.core.userData?.name || 'UNKNOWN',
-        action, targetUid, targetName, details, timestamp: Date.now()
-      });
+      await push(ref(db, 'mod_logs'), { uid: window.core.u.uid, adminName: window.core.userData?.name || 'UNKNOWN', action, targetUid, targetName, details, timestamp: Date.now() });
     }
 
     window.core = {
@@ -199,14 +189,32 @@
         setTimeout(() => { n.style.opacity = '0'; setTimeout(() => n.remove(), 500); }, 3000);
       },
 
-      async copyId(text) {
-        try { await navigator.clipboard.writeText(text); this.notify(window.t('copied') + text); } catch(err) { const input = document.createElement('input'); input.value = text; document.body.appendChild(input); input.select(); document.execCommand('copy'); document.body.removeChild(input); this.notify(window.t('copied') + text); }
+      async copyId(text) { 
+        try { 
+          await navigator.clipboard.writeText(text); 
+          this.notify(window.t('copied') + text); 
+        } catch(err) { 
+          const input = document.createElement('input'); 
+          input.value = text; 
+          document.body.appendChild(input); 
+          input.select(); 
+          document.execCommand('copy'); 
+          document.body.removeChild(input); 
+          this.notify(window.t('copied') + text); 
+        } 
       },
-
+      
       async ask(txt) { return new Promise((res) => { const m = document.getElementById('confirm-modal'); document.getElementById('confirm-text').innerText = txt.toUpperCase(); document.getElementById('confirm-yes').classList.remove('hidden'); document.getElementById('confirm-no').classList.remove('hidden'); document.getElementById('confirm-cancel').classList.add('hidden'); document.getElementById('confirm-yes').innerText = window.lang === 'ru' ? 'ДА' : 'YES'; document.getElementById('confirm-no').innerText = window.lang === 'ru' ? 'НЕТ' : 'NO'; m.classList.remove('hidden'); document.getElementById('confirm-yes').onclick = () => { m.classList.add('hidden'); res(true); }; document.getElementById('confirm-no').onclick = () => { m.classList.add('hidden'); res(false); }; }); },
-
-      getUserStyle(d) { if (d?.isBan) return { class: "text-red-600 opacity-50", sub: window.t('terminated_sub') }; if (d?.isMaker) return { class: "txt-maker", sub: window.t('founder_sub') }; if (d?.isAdmin && d?.isPro) return { class: "txt-elite", sub: window.t('elite_sub') }; if (d?.isAdmin) return { class: "txt-admin", sub: window.t('admin_sub') }; if (d?.isPro) return { class: "txt-pro", sub: window.t('pro_sub') }; return { class: "text-white/80", sub: window.t('player_sub') }; },
-
+      async askWinner() { return new Promise((res) => { const m = document.getElementById('confirm-modal'); document.getElementById('confirm-text').innerText = window.t('choose_winner'); document.getElementById('confirm-yes').classList.remove('hidden'); document.getElementById('confirm-no').classList.remove('hidden'); document.getElementById('confirm-cancel').classList.remove('hidden'); document.getElementById('confirm-yes').innerText = 'ALPHA'; document.getElementById('confirm-no').innerText = 'OMEGA'; document.getElementById('confirm-cancel').innerText = window.lang === 'ru' ? 'ОТМЕНА' : 'CANCEL'; m.classList.remove('hidden'); document.getElementById('confirm-yes').onclick = () => { m.classList.add('hidden'); res('alpha'); }; document.getElementById('confirm-no').onclick = () => { m.classList.add('hidden'); res('omega'); }; document.getElementById('confirm-cancel').onclick = () => { m.classList.add('hidden'); res(null); }; }); },
+      
+      getUserStyle(d) {
+        if (d?.isBan) return { class: "text-red-600 opacity-50", sub: window.t('terminated_sub') };
+        if (d?.isMaker) return { class: "txt-maker", sub: window.t('founder_sub') };
+        if (d?.isAdmin && d?.isPro) return { class: "txt-elite", sub: window.t('elite_sub') };
+        if (d?.isAdmin) return { class: "txt-admin", sub: window.t('admin_sub') };
+        if (d?.isPro) return { class: "txt-pro", sub: window.t('pro_sub') };
+        return { class: "text-white/80", sub: window.t('player_sub') };
+      },
       formatHours(mins) { return Math.floor(Math.max(0, mins || 0) / 60) + "H"; },
 
       openEditName() { document.getElementById('edit-name-in').value = this.userData.name; document.getElementById('name-modal').classList.remove('hidden'); },
@@ -216,7 +224,24 @@
       async saveLink() { const l = document.getElementById('link-label-in').value.trim(); const u = document.getElementById('link-url-in').value.trim(); if(l && u) { const id = editingLinkId || push(ref(db, `users/${this.u.uid}/socials`)).key; await update(ref(db, `users/${this.u.uid}/socials/${id}`), { label: l.toUpperCase(), url: u }); this.notify(window.t('link_saved')); document.getElementById('link-modal').classList.add('hidden'); } },
       async deleteLink(id) { if(await this.ask(window.t('delete_link_q'))) { await remove(ref(db, `users/${this.u.uid}/socials/${id}`)); this.notify(window.t('link_removed'), "err"); } },
 
-      async findUser() { const val = document.getElementById('user-search-in').value.trim(); if(!val) return; const directSnap = await get(ref(db, `users/${val}`)); if(directSnap.exists()) { this.showMini(val); return; } const q = query(ref(db, 'users'), orderByChild('name'), equalTo(val.toUpperCase())); const s = await get(q); if(s.exists()) { const uid = Object.keys(s.val())[0]; this.showMini(uid); } else { this.notify(window.t('not_found'), "err"); } },
+      async findUser() {
+        const val = document.getElementById('user-search-in').value.trim();
+        if(!val) return;
+        const directSnap = await get(ref(db, `users/${val}`));
+        if(directSnap.exists()) { this.showMini(val); return; }
+        const q = query(ref(db, 'users'), orderByChild('name'), equalTo(val.toUpperCase()));
+        const s = await get(q);
+        if(s.exists()) { const uid = Object.keys(s.val())[0]; this.showMini(uid); return; }
+        const allUsers = await get(ref(db, 'users'));
+        const users = allUsers.val() || {};
+        for (const [uid, data] of Object.entries(users)) {
+          if (data.name && data.name.toLowerCase().includes(val.toLowerCase())) {
+            this.showMini(uid);
+            return;
+          }
+        }
+        this.notify(window.t('not_found'), "err");
+      },
       async findByCode() { const code = document.getElementById('search-in').value.toUpperCase().trim(); if(!code) return; const q = query(ref(db, 'tourneys'), orderByChild('code'), equalTo(code)); const s = await get(q); if(s.exists()) { const tid = Object.keys(s.val())[0]; this.openLobby(tid); } else { this.notify(window.t('invalid_code'), "err"); } },
 
       async join(side) { const tSnap = await get(ref(db, `tourneys/${this.currentTid}`)); const t = tSnap.val(); if(t.status !== 'open') return this.notify(window.t('entry_closed'), "err"); const parts = t.format.split(/v|vs/i).map(s => parseInt(s.trim())); const limit = side === 'alpha' ? parts[0] : parts[1]; if((t[side] ? Object.keys(t[side]).length : 0) >= limit) return this.notify(window.t('team_full'), "err"); if((t.alpha && t.alpha[this.u.uid]) || (t.omega && t.omega[this.u.uid])) return this.notify(window.t('already_in'), "err"); await update(ref(db, `tourneys/${this.currentTid}/${side}`), { [this.u.uid]: this.userData.name }); this.notify(window.t('joined') + side.toUpperCase()); },
@@ -226,132 +251,45 @@
       async addFriend(targetUid) { const myPath = `friends/${this.u.uid}/${targetUid}`, theirPath = `friends/${targetUid}/${this.u.uid}`; const snap = await get(ref(db, myPath)), status = snap.val(); if (!status) { await set(ref(db, myPath), 'pending_out'); await set(ref(db, theirPath), 'pending_in'); this.notify(window.t('sent')); } else if (status === 'pending_in') { await set(ref(db, myPath), 'friends'); await set(ref(db, theirPath), 'friends'); this.notify(window.t('accept')); } document.getElementById('mini-modal').classList.add('hidden'); },
       async removeFriend(targetUid) { if(await this.ask(window.t('friend_rem_q'))) { await remove(ref(db, `friends/${this.u.uid}/${targetUid}`)); await remove(ref(db, `friends/${targetUid}/${this.u.uid}`)); this.notify(window.t('link_removed')); document.getElementById('mini-modal').classList.add('hidden'); } },
 
-      // ========== ГОЛОСОВЫЕ СООБЩЕНИЯ ==========
-      async startRecording() {
-        try {
-          if (location.protocol !== 'https:' && location.hostname !== 'localhost') {
-            this.notify("HTTPS REQUIRED FOR MIC", "err");
-            return;
-          }
-          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-          mediaRecorder = new MediaRecorder(stream);
-          audioChunks = [];
-          mediaRecorder.ondataavailable = (e) => audioChunks.push(e.data);
-          mediaRecorder.onstop = () => this.sendVoice();
-          mediaRecorder.start();
-          document.getElementById('voice-btn').classList.add('bg-red-600', 'animate-pulse');
-        } catch (err) { 
-          console.error(err);
-          this.notify("MIC ERROR: " + err.message, "err"); 
+      async startRecording() { try { if (location.protocol !== 'https:' && location.hostname !== 'localhost') { this.notify("HTTPS REQUIRED FOR MIC", "err"); return; } const stream = await navigator.mediaDevices.getUserMedia({ audio: true }); mediaRecorder = new MediaRecorder(stream); audioChunks = []; mediaRecorder.ondataavailable = (e) => audioChunks.push(e.data); mediaRecorder.onstop = () => this.sendVoice(); mediaRecorder.start(); document.getElementById('voice-btn').classList.add('bg-red-600', 'animate-pulse'); } catch (err) { console.error(err); this.notify("MIC ERROR: " + err.message, "err"); } },
+      stopRecording() { if (mediaRecorder && mediaRecorder.state !== "inactive") { mediaRecorder.stop(); document.getElementById('voice-btn').classList.remove('bg-red-600', 'animate-pulse'); } },
+      async sendVoice() { if (audioChunks.length === 0) return; const blob = new Blob(audioChunks, { type: 'audio/webm' }); const reader = new FileReader(); reader.onload = async (e) => { await push(ref(db, `direct_messages/${currentDmId}`), { uid: this.u.uid, msg: e.target.result, type: 'audio', ts: Date.now() }); }; reader.readAsDataURL(blob); },
+
+      // Audio player
+      stopAllAudio() { if (this.currentAudioId) { const prevAudio = document.getElementById(this.currentAudioId); if (prevAudio) { prevAudio.pause(); prevAudio.currentTime = 0; } if (this.audioWaveInterval) clearInterval(this.audioWaveInterval); this.currentAudioId = null; } document.querySelectorAll('.voice-play-btn svg').forEach(svg => { if (svg) svg.innerHTML = '<polygon points="5 3 19 12 5 21 5 3" fill="white"/>'; }); },
+      toggleAudio(audioId, src) { const audio = document.getElementById(audioId); const playBtn = document.getElementById(`playBtn_${audioId}`); if (!audio) return; if (this.currentAudioId === audioId && !audio.paused) { audio.pause(); this.stopAllAudio(); return; } this.stopAllAudio(); if (!audio.src || audio.src !== src) { audio.src = src; audio.load(); } audio.play(); this.currentAudioId = audioId; const svg = playBtn?.querySelector('svg'); if (svg) svg.innerHTML = '<rect x="6" y="4" width="4" height="16" fill="white"/><rect x="14" y="4" width="4" height="16" fill="white"/>'; this.animateWaveform(audioId); this.updateAudioProgress(audioId); audio.onended = () => { this.stopAllAudio(); const endSvg = document.getElementById(`playBtn_${audioId}`)?.querySelector('svg'); if (endSvg) endSvg.innerHTML = '<polygon points="5 3 19 12 5 21 5 3" fill="white"/>'; }; },
+      animateWaveform(audioId) { const waveform = document.getElementById(`waveform_${audioId}`); if (!waveform) return; const bars = waveform.querySelectorAll('.wave-bar'); if (this.audioWaveInterval) clearInterval(this.audioWaveInterval); this.audioWaveInterval = setInterval(() => { if (this.currentAudioId !== audioId) { clearInterval(this.audioWaveInterval); return; } bars.forEach(bar => { bar.style.height = `${Math.random() * 24 + 6}px`; }); }, 80); },
+      updateAudioProgress(audioId) { const audio = document.getElementById(audioId); const progressFill = document.getElementById(`progressFill_${audioId}`); const currentTimeSpan = document.getElementById(`currentTime_${audioId}`); const durationSpan = document.getElementById(`duration_${audioId}`); if (!audio) return; const setDuration = () => { if (isNaN(audio.duration)) return; const m = Math.floor(audio.duration / 60), s = Math.floor(audio.duration % 60); if (durationSpan) durationSpan.innerText = `${m}:${s.toString().padStart(2, '0')}`; }; if (audio.readyState >= 1) setDuration(); else audio.addEventListener('loadedmetadata', setDuration); const update = setInterval(() => { if (this.currentAudioId !== audioId) { clearInterval(update); return; } if (audio.duration && !isNaN(audio.duration)) { const percent = (audio.currentTime / audio.duration) * 100; if (progressFill) progressFill.style.width = `${percent}%`; const m = Math.floor(audio.currentTime / 60), s = Math.floor(audio.currentTime % 60); if (currentTimeSpan) currentTimeSpan.innerText = `${m}:${s.toString().padStart(2, '0')}`; } }, 100); },
+      seekAudio(audioId, event) { const audio = document.getElementById(audioId); if (!audio || !audio.duration) return; const rect = event.currentTarget.getBoundingClientRect(); audio.currentTime = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width)) * audio.duration; },
+
+      // DM с кнопками редактирования/удаления
+      openEditModal(msgId, currentText) {
+        pendingEditMsgId = msgId;
+        document.getElementById('edit-text-input').value = currentText;
+        document.getElementById('edit-modal').classList.remove('hidden');
+      },
+      async saveEditedMessage() {
+        const newText = document.getElementById('edit-text-input').value.trim();
+        if (newText) {
+          await update(ref(db, `direct_messages/${currentDmId}/${pendingEditMsgId}`), { msg: newText });
+          this.notify(window.t('name_updated'));
+        }
+        document.getElementById('edit-modal').classList.add('hidden');
+        pendingEditMsgId = null;
+      },
+      async deleteMessage(msgId) {
+        if(await this.ask(window.t('del_msg'))) {
+          await remove(ref(db, `direct_messages/${currentDmId}/${msgId}`));
+          this.notify(window.t('link_removed'));
         }
       },
 
-      stopRecording() {
-        if (mediaRecorder && mediaRecorder.state !== "inactive") {
-          mediaRecorder.stop();
-          document.getElementById('voice-btn').classList.remove('bg-red-600', 'animate-pulse');
-        }
-      },
-
-      async sendVoice() {
-        if (audioChunks.length === 0) return;
-        const blob = new Blob(audioChunks, { type: 'audio/webm' });
-        const reader = new FileReader();
-        reader.onload = async (e) => {
-          await push(ref(db, `direct_messages/${currentDmId}`), { 
-            uid: this.u.uid, msg: e.target.result, type: 'audio', ts: Date.now() 
-          });
-        };
-        reader.readAsDataURL(blob);
-      },
-
-      // ========== АУДИО ПЛЕЕР С ВИЗУАЛИЗАЦИЕЙ ==========
-      stopAllAudio() {
-        if (this.currentAudioId) {
-          const prevAudio = document.getElementById(this.currentAudioId);
-          if (prevAudio) { prevAudio.pause(); prevAudio.currentTime = 0; }
-          if (this.audioWaveInterval) clearInterval(this.audioWaveInterval);
-          this.currentAudioId = null;
-        }
-        document.querySelectorAll('.voice-play-btn svg').forEach(svg => {
-          if (svg) svg.innerHTML = '<polygon points="5 3 19 12 5 21 5 3" fill="white"/>';
-        });
-      },
-
-      toggleAudio(audioId, src) {
-        const audio = document.getElementById(audioId);
-        const playBtn = document.getElementById(`playBtn_${audioId}`);
-        if (!audio) return;
-        if (this.currentAudioId === audioId && !audio.paused) {
-          audio.pause();
-          this.stopAllAudio();
-          return;
-        }
-        this.stopAllAudio();
-        if (!audio.src || audio.src !== src) { audio.src = src; audio.load(); }
-        audio.play();
-        this.currentAudioId = audioId;
-        const svg = playBtn?.querySelector('svg');
-        if (svg) svg.innerHTML = '<rect x="6" y="4" width="4" height="16" fill="white"/><rect x="14" y="4" width="4" height="16" fill="white"/>';
-        this.animateWaveform(audioId);
-        this.updateAudioProgress(audioId);
-        audio.onended = () => {
-          this.stopAllAudio();
-          const endSvg = document.getElementById(`playBtn_${audioId}`)?.querySelector('svg');
-          if (endSvg) endSvg.innerHTML = '<polygon points="5 3 19 12 5 21 5 3" fill="white"/>';
-        };
-      },
-
-      animateWaveform(audioId) {
-        const waveform = document.getElementById(`waveform_${audioId}`);
-        if (!waveform) return;
-        const bars = waveform.querySelectorAll('.wave-bar');
-        if (this.audioWaveInterval) clearInterval(this.audioWaveInterval);
-        this.audioWaveInterval = setInterval(() => {
-          if (this.currentAudioId !== audioId) { clearInterval(this.audioWaveInterval); return; }
-          bars.forEach(bar => { bar.style.height = `${Math.random() * 24 + 6}px`; });
-        }, 80);
-      },
-
-      updateAudioProgress(audioId) {
-        const audio = document.getElementById(audioId);
-        const progressFill = document.getElementById(`progressFill_${audioId}`);
-        const currentTimeSpan = document.getElementById(`currentTime_${audioId}`);
-        const durationSpan = document.getElementById(`duration_${audioId}`);
-        if (!audio) return;
-        const setDuration = () => {
-          if (isNaN(audio.duration)) return;
-          const m = Math.floor(audio.duration / 60), s = Math.floor(audio.duration % 60);
-          if (durationSpan) durationSpan.innerText = `${m}:${s.toString().padStart(2, '0')}`;
-        };
-        if (audio.readyState >= 1) setDuration();
-        else audio.addEventListener('loadedmetadata', setDuration);
-        const update = setInterval(() => {
-          if (this.currentAudioId !== audioId) { clearInterval(update); return; }
-          if (audio.duration && !isNaN(audio.duration)) {
-            const percent = (audio.currentTime / audio.duration) * 100;
-            if (progressFill) progressFill.style.width = `${percent}%`;
-            const m = Math.floor(audio.currentTime / 60), s = Math.floor(audio.currentTime % 60);
-            if (currentTimeSpan) currentTimeSpan.innerText = `${m}:${s.toString().padStart(2, '0')}`;
-          }
-        }, 100);
-      },
-
-      seekAudio(audioId, event) {
-        const audio = document.getElementById(audioId);
-        if (!audio || !audio.duration) return;
-        const rect = event.currentTarget.getBoundingClientRect();
-        audio.currentTime = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width)) * audio.duration;
-      },
-
-      // ========== DM ЧАТ ==========
       openDm(targetUid, targetName) {
         const ids = [this.u.uid, targetUid].sort();
         currentDmId = ids.join("_");
         document.getElementById('dm-target-name').innerText = targetName;
         document.getElementById('dm-modal').classList.remove('hidden');
         document.getElementById('mini-modal').classList.add('hidden');
-        
         const dmRef = ref(db, `direct_messages/${currentDmId}`);
         off(dmRef);
         onValue(query(dmRef, limitToLast(30)), (s) => {
@@ -360,53 +298,63 @@
           s.forEach(m => {
             const v = m.val(), isMe = v.uid === this.u.uid, mid = m.key;
             let content = '';
-            
             if (v.type === 'image') {
               content = `<img src="${v.msg}" class="max-w-[200px] rounded-2xl border border-white/10">`;
-            } 
-            else if (v.type === 'video') {
+            } else if (v.type === 'video') {
               content = `<div class="bg-black/20 p-2 rounded-2xl"><video src="${v.msg}" controls class="max-w-[240px] rounded-xl"></video></div>`;
-            }
-            else if (v.type === 'audio') {
+            } else if (v.type === 'audio') {
               const audioId = 'audio_' + mid;
               const barsHtml = Array(20).fill(0).map(() => `<div class="wave-bar" style="height: ${Math.random() * 20 + 6}px"></div>`).join('');
-              content = `
-                <div class="voice-message">
-                  <div style="display: flex; align-items: center; gap: 12px;">
-                    <button class="voice-play-btn" id="playBtn_${audioId}" onclick="core.toggleAudio('${audioId}', \`${v.msg}\`)">
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><polygon points="5 3 19 12 5 21 5 3" fill="white"/></svg>
-                    </button>
-                    <div style="flex: 1;">
-                      <div class="voice-waveform" id="waveform_${audioId}">${barsHtml}</div>
-                      <div class="voice-progress-container">
-                        <div class="voice-progress-track" id="progressBar_${audioId}" onclick="core.seekAudio('${audioId}', event)">
-                          <div class="voice-progress-fill" id="progressFill_${audioId}" style="width: 0%"></div>
-                        </div>
-                        <div class="voice-time"><span id="currentTime_${audioId}">0:00</span><span id="duration_${audioId}">0:00</span></div>
-                      </div>
-                    </div>
-                  </div>
-                  <audio id="${audioId}" style="display: none;"></audio>
-                </div>
-              `;
-            }
-            else if (v.type === 'file') {
+              content = `<div class="voice-message"><div style="display: flex; align-items: center; gap: 12px;"><button class="voice-play-btn" id="playBtn_${audioId}" onclick="core.toggleAudio('${audioId}', \`${v.msg}\`)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><polygon points="5 3 19 12 5 21 5 3" fill="white"/></svg></button><div style="flex: 1;"><div class="voice-waveform" id="waveform_${audioId}">${barsHtml}</div><div class="voice-progress-container"><div class="voice-progress-track" id="progressBar_${audioId}" onclick="core.seekAudio('${audioId}', event)"><div class="voice-progress-fill" id="progressFill_${audioId}" style="width: 0%"></div></div><div class="voice-time"><span id="currentTime_${audioId}">0:00</span><span id="duration_${audioId}">0:00</span></div></div></div></div><audio id="${audioId}" style="display: none;"></audio></div>`;
+            } else if (v.type === 'file') {
               content = `<div class="bg-black/20 p-4 rounded-xl flex items-center gap-4"><div class="w-10 h-10 bg-blue-600 rounded flex items-center justify-center text-[8px]">DOC</div><div class="flex-1"><div class="text-[7px] opacity-40 uppercase mb-2">${v.fileName || 'FILE'}</div><button onclick="core.downloadFile('${v.msg}', '${v.fileName}')" class="text-blue-500 font-black text-[9px] uppercase">DOWNLOAD</button></div></div>`;
-            }
-            else {
+            } else {
               content = v.msg;
             }
             
-            b.innerHTML += `<div class="flex flex-col ${isMe ? 'items-end' : 'items-start'} mb-4 animate-slide"><div onclick="${isMe ? `core.deleteDmMsg('${mid}')` : ''}" class="px-4 py-3 rounded-2xl text-[10px] font-bold ${isMe ? 'bg-blue-600 text-white rounded-tr-none cursor-pointer' : 'bg-white/5 text-white/70 rounded-tl-none'}">${content}</div></div>`;
+            const actionButtons = isMe ? `
+              <div class="flex gap-2 mt-1 justify-end">
+                ${v.type === 'text' ? `<button onclick="core.openEditModal('${mid}', '${v.msg.replace(/'/g, "\\'")}')" class="opacity-50 hover:opacity-100 transition p-1.5 rounded-lg hover:bg-white/10" title="Edit">${editIcon}</button>` : ''}
+                <button onclick="core.deleteMessage('${mid}')" class="opacity-50 hover:opacity-100 transition p-1.5 rounded-lg hover:bg-white/10" title="Delete">${deleteIcon}</button>
+              </div>
+            ` : '';
+            
+            b.innerHTML += `
+              <div class="flex flex-col ${isMe ? 'items-end' : 'items-start'} mb-4 animate-slide">
+                <div class="px-4 py-3 rounded-2xl text-[10px] font-bold ${isMe ? 'bg-blue-600 text-white rounded-tr-none' : 'bg-white/5 text-white/70 rounded-tl-none'}">
+                  ${content}
+                </div>
+                ${actionButtons}
+              </div>
+            `;
           });
           b.scrollTop = b.scrollHeight;
         });
       },
-
       async sendDm() { const i = document.getElementById('dm-in'); if(!i.value.trim() || !currentDmId) return; await push(ref(db, `direct_messages/${currentDmId}`), { uid: this.u.uid, msg: i.value.trim(), type: 'text', ts: Date.now() }); i.value = ''; },
       async sendDmFile(e) { const file = e.target.files[0]; if (!file || !currentDmId) return; const reader = new FileReader(); reader.onload = async (ev) => { let type = 'file'; if (file.type.startsWith('image/')) type = 'image'; else if (file.type.startsWith('video/')) type = 'video'; else if (file.type.startsWith('audio/')) type = 'audio'; await push(ref(db, `direct_messages/${currentDmId}`), { uid: this.u.uid, msg: ev.target.result, type: type, fileName: file.name, ts: Date.now() }); }; reader.readAsDataURL(file); },
-      async deleteDmMsg(msgId) { if(await this.ask(window.t('del_msg'))) { await remove(ref(db, `direct_messages/${currentDmId}/${msgId}`)); } },
       downloadFile(base64, name) { const a = document.createElement('a'); a.href = base64; a.download = name || "file"; a.click(); },
+
+      // Кастомный репорт
+      openReportModal(targetUid, targetName) {
+        pendingReportTarget = { uid: targetUid, name: targetName };
+        document.getElementById('report-reason').value = '';
+        document.getElementById('report-modal').classList.remove('hidden');
+      },
+      async submitReport() {
+        const reason = document.getElementById('report-reason').value.trim();
+        if (!reason) { this.notify(window.t('report_reason') + '!', 'err'); return; }
+        if (pendingReportTarget) {
+          await push(ref(db, 'reports'), {
+            reporterUid: this.u.uid, reporterName: this.userData.name,
+            reportedUid: pendingReportTarget.uid, reportedName: pendingReportTarget.name,
+            reason: reason, timestamp: Date.now()
+          });
+          this.notify('REPORT SENT TO MODERATORS');
+          document.getElementById('report-modal').classList.add('hidden');
+          pendingReportTarget = null;
+        }
+      },
 
       renderFriendsList(uid) { const listEl = document.getElementById('p-friends-list'); const fRef = ref(db, `friends/${uid}`); off(fRef); onValue(fRef, async (snap) => { listEl.innerHTML = ''; const data = snap.val(); if (!data) { listEl.innerHTML = `<p class="text-[8px] opacity-10 font-black text-center mt-4 text-white uppercase">EMPTY</p>`; return; } for (const [fUid, status] of Object.entries(data)) { if (status === 'friends' || (status === 'pending_in' && uid === this.u.uid)) { const fSnap = await get(ref(db, `users/${fUid}`)), fData = fSnap.val(); if (!fData) continue; const isP = status === 'pending_in'; const isOnline = this.isUserOnline(fUid); listEl.innerHTML += `<div class="bg-white/5 p-4 rounded-2xl flex justify-between items-center mb-2 animate-slide"><div class="flex items-center gap-3 cursor-pointer" onclick="core.showMini('${fUid}')"><div class="relative"><div class="w-8 h-8 rounded-lg bg-cover bg-center bg-zinc-800" style="background-image:url(${fData.avatar || ''})"></div><div class="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border border-black ${isOnline ? 'bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.8)]' : 'bg-gray-500'}"></div></div><div><div class="text-[9px] font-black uppercase text-white">${fData.name}</div><div class="text-[6px] font-black opacity-30 uppercase text-white">${isP ? 'REQUEST' : 'FRIEND'}</div></div></div><div class="flex gap-1">${!isP ? `<button onclick="core.openDm('${fUid}', '${fData.name}')" class="bg-blue-600/20 text-blue-500 w-8 h-8 rounded-lg flex items-center justify-center">${msgIcon}</button>` : ''}${isP ? `<button onclick="core.addFriend('${fUid}')" class="bg-green-600/20 text-green-500 w-8 h-8 rounded-lg font-black text-[10px]">✓</button>` : ''}<button onclick="core.removeFriend('${fUid}')" class="bg-red-500/10 text-red-500/50 w-8 h-8 rounded-lg font-black text-[10px]">×</button></div></div>`; } } }); },
 
@@ -416,7 +364,7 @@
       listenChat(tid) { const cRef = ref(db, `chats/${tid}`); off(cRef); onValue(query(cRef, limitToLast(30)), (s) => { const b = document.getElementById('chat-box'); b.innerHTML = ''; s.forEach(m => { const v = m.val(), isMe = v.uid === this.u.uid; b.innerHTML += `<div class="flex flex-col ${isMe ? 'items-end' : 'items-start'} mb-4"><span class="text-[7px] font-black opacity-20 uppercase mb-1 text-white">${v.name}</span><div class="px-4 py-3 rounded-2xl text-[10px] font-bold ${isMe ? 'bg-blue-600 text-white rounded-tr-none' : 'bg-white/5 text-white/70 rounded-tl-none'}">${v.msg}</div></div>`; }); b.scrollTop = b.scrollHeight; }); },
 
       async finishMatch(winner) { if (!winner) return; if (!this.currentTid) return; const tSnap = await get(ref(db, `tourneys/${this.currentTid}`)); const t = tSnap.val(); if (!t || t.status === 'finished') return this.notify("MATCH ALREADY FINISHED", "err"); const winnerTeam = winner === 'alpha' ? t.alpha : t.omega; const loserTeam = winner === 'alpha' ? t.omega : t.alpha; if (!winnerTeam || !loserTeam || Object.keys(winnerTeam).length === 0 || Object.keys(loserTeam).length === 0) return this.notify("TEAMS NOT FULL", "err"); for (const uid of Object.keys(winnerTeam)) { await update(ref(db, `users/${uid}`), { exr: increment(25), wins: increment(1) }); } for (const uid of Object.keys(loserTeam)) { await update(ref(db, `users/${uid}`), { exr: increment(-15), losses: increment(1) }); } await remove(ref(db, `tourneys/${this.currentTid}`)); await remove(ref(db, `chats/${this.currentTid}`)); if(this.isModerator()) addModLog('FINISH_MATCH', null, null, t.name); this.notify(`THE MATCH IS OVER! EXR UPDATE`, 'success'); this.show('home'); },
-      async askFinish() { const tSnap = await get(ref(db, `tourneys/${this.currentTid}`)); const t = tSnap.val(); if (t.status === 'finished') return this.notify("MATCH ALREADY FINISHED", "err"); if (!t.alpha || !t.omega || Object.keys(t.alpha).length === 0 || Object.keys(t.omega).length === 0) return this.notify("BOTH TEAMS MUST HAVE PLAYERS", "err"); const winner = await (() => new Promise((res) => { const m = document.getElementById('confirm-modal'); document.getElementById('confirm-text').innerText = window.t('choose_winner'); document.getElementById('confirm-yes').classList.remove('hidden'); document.getElementById('confirm-no').classList.remove('hidden'); document.getElementById('confirm-cancel').classList.remove('hidden'); document.getElementById('confirm-yes').innerText = 'ALPHA'; document.getElementById('confirm-no').innerText = 'OMEGA'; document.getElementById('confirm-cancel').innerText = window.lang === 'ru' ? 'ОТМЕНА' : 'CANCEL'; m.classList.remove('hidden'); document.getElementById('confirm-yes').onclick = () => { m.classList.add('hidden'); res('alpha'); }; document.getElementById('confirm-no').onclick = () => { m.classList.add('hidden'); res('omega'); }; document.getElementById('confirm-cancel').onclick = () => { m.classList.add('hidden'); res(null); }; }))(); if (winner) await this.finishMatch(winner); },
+      async askFinish() { const tSnap = await get(ref(db, `tourneys/${this.currentTid}`)); const t = tSnap.val(); if (t.status === 'finished') return this.notify("MATCH ALREADY FINISHED", "err"); if (!t.alpha || !t.omega || Object.keys(t.alpha).length === 0 || Object.keys(t.omega).length === 0) return this.notify("BOTH TEAMS MUST HAVE PLAYERS", "err"); const winner = await this.askWinner(); if (winner) await this.finishMatch(winner); },
 
       async openEditTourney() { const s = await get(ref(db, `tourneys/${this.currentTid}`)); const t = s.val(); editingTourneyId = this.currentTid; document.getElementById('dn').value = t.name; document.getElementById('df').value = t.format; document.getElementById('dp').value = t.prize; document.getElementById('dd').value = t.date; document.getElementById('dlink').value = t.link; document.getElementById('ddesc').value = t.desc; this.tempCover = t.cover || ""; document.getElementById('op-preview').style.backgroundImage = t.cover ? `url(${t.cover})` : 'none'; document.getElementById('create-modal').classList.remove('hidden'); },
       async createTourney() { const n = document.getElementById('dn').value.trim(), link = document.getElementById('dlink').value.trim(), fmt = document.getElementById('df').value.trim(); if(!n || !link || !fmt) return this.notify(window.t('fill_fields'), "err"); const data = { name: n.toUpperCase(), prize: document.getElementById('dp').value || "NO PRIZE", format: fmt.toUpperCase(), desc: document.getElementById('ddesc').value || "NO DESCRIPTION", link: link, cover: this.tempCover || "", date: document.getElementById('dd').value || "TBA" }; if(editingTourneyId) { await update(ref(db, `tourneys/${editingTourneyId}`), data); this.notify("EVENT UPDATED"); editingTourneyId = null; } else { const tid = push(ref(db, 'tourneys')).key, sc = "AX-" + Math.floor(100 + Math.random() * 899); await set(ref(db, `tourneys/${tid}`), { ...data, id: tid, code: sc, owner: this.u.uid, status: 'open' }); this.notify(`${window.t('event_created')} ${sc}`); } document.getElementById('create-modal').classList.add('hidden'); this.tempCover = ""; },
@@ -432,7 +380,14 @@
         this.renderModLogs();
         this.initModChat();
       },
-
+      filterModUsers() {
+        const searchTerm = document.getElementById('mod-user-search').value.toLowerCase();
+        document.querySelectorAll('#mod-users-list .mod-user-item').forEach(item => {
+          const name = item.dataset.name?.toLowerCase() || '';
+          const uid = item.dataset.uid?.toLowerCase() || '';
+          item.classList.toggle('hidden', !(name.includes(searchTerm) || uid.includes(searchTerm)));
+        });
+      },
       async renderModUsers() {
         const container = document.getElementById('mod-users-list');
         if (!container) return;
@@ -443,17 +398,16 @@
           const style = this.getUserStyle(data);
           const isOnline = this.isUserOnline(uid);
           const canModerate = !data.isMaker;
-          container.innerHTML += `<div class="bg-white/5 p-5 rounded-2xl border border-white/10 mb-3 hover:bg-white/10 transition-all"><div class="flex justify-between items-start flex-wrap gap-3"><div class="flex items-center gap-3 cursor-pointer" onclick="core.showMini('${uid}')"><div class="relative"><div class="w-12 h-12 rounded-xl bg-cover bg-center bg-zinc-800" style="background-image:url(${data.avatar || ''})"></div><div class="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border border-black ${isOnline ? 'bg-green-500' : 'bg-gray-500'}"></div></div><div><div class="text-sm font-black uppercase ${style.class}">${data.name}</div><div class="text-[8px] opacity-30 uppercase">EXR: ${data.exr || 0} | ${data.isMaker ? 'MAKER' : data.isAdmin ? 'ADMIN' : data.isPro ? 'PRO' : 'PLAYER'}</div></div></div>${canModerate ? `<div class="flex flex-wrap gap-2"><button onclick="core.modBanUser('${uid}', '${data.name}', ${data.isBan || false})" class="px-4 py-2 rounded-xl text-[9px] font-black uppercase ${data.isBan ? 'bg-green-600/20 text-green-500' : 'bg-red-600/20 text-red-500'}">${data.isBan ? window.t('unban') : window.t('ban')}</button>${!data.isAdmin ? `<button onclick="core.modMakeAdmin('${uid}', '${data.name}')" class="px-4 py-2 rounded-xl bg-purple-600/20 text-purple-400 text-[9px] font-black uppercase">${window.t('make_admin')}</button>` : `<button onclick="core.modRemoveAdmin('${uid}', '${data.name}')" class="px-4 py-2 rounded-xl bg-orange-600/20 text-orange-400 text-[9px] font-black uppercase">${window.t('remove_admin')}</button>`}${!data.isPro ? `<button onclick="core.modMakePro('${uid}', '${data.name}')" class="px-4 py-2 rounded-xl bg-yellow-600/20 text-yellow-500 text-[9px] font-black uppercase">${window.t('make_pro')}</button>` : `<button onclick="core.modRemovePro('${uid}', '${data.name}')" class="px-4 py-2 rounded-xl bg-orange-600/20 text-orange-400 text-[9px] font-black uppercase">${window.t('remove_pro')}</button>`}</div>` : '<div class="text-[8px] text-purple-400 font-black">MAKER</div>'}</div></div>`;
+          container.innerHTML += `<div class="mod-user-item bg-white/5 p-5 rounded-2xl border border-white/10 mb-3 hover:bg-white/10 transition-all" data-name="${data.name.toLowerCase()}" data-uid="${uid.toLowerCase()}"><div class="flex justify-between items-start flex-wrap gap-3"><div class="flex items-center gap-3 cursor-pointer" onclick="core.showMini('${uid}')"><div class="relative"><div class="w-12 h-12 rounded-xl bg-cover bg-center bg-zinc-800" style="background-image:url(${data.avatar || ''})"></div><div class="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border border-black ${isOnline ? 'bg-green-500' : 'bg-gray-500'}"></div></div><div><div class="text-sm font-black uppercase ${style.class}">${data.name}</div><div class="text-[8px] opacity-30 uppercase">ID: ${uid.substring(0,8)}... | EXR: ${data.exr || 0} | ${data.isMaker ? 'MAKER' : data.isAdmin && data.isPro ? 'ELITE' : data.isAdmin ? 'ADMIN' : data.isPro ? 'PRO' : 'PLAYER'}</div></div></div><div class="flex gap-2 items-center"><button onclick="core.copyId('${uid}')" class="px-3 py-2 rounded-xl bg-white/10 text-white/60 text-[8px] font-black uppercase hover:bg-blue-600/30">${window.t('copy_id')}</button>${canModerate ? `<div class="flex flex-wrap gap-2"><button onclick="core.modBanUser('${uid}', '${data.name}', ${data.isBan || false})" class="px-4 py-2 rounded-xl text-[9px] font-black uppercase ${data.isBan ? 'bg-green-600/20 text-green-500' : 'bg-red-600/20 text-red-500'}">${data.isBan ? window.t('unban') : window.t('ban')}</button>${!data.isAdmin ? `<button onclick="core.modMakeAdmin('${uid}', '${data.name}')" class="px-4 py-2 rounded-xl bg-purple-600/20 text-purple-400 text-[9px] font-black uppercase">${window.t('make_admin')}</button>` : `<button onclick="core.modRemoveAdmin('${uid}', '${data.name}')" class="px-4 py-2 rounded-xl bg-orange-600/20 text-orange-400 text-[9px] font-black uppercase">${window.t('remove_admin')}</button>`}${!data.isPro ? `<button onclick="core.modMakePro('${uid}', '${data.name}')" class="px-4 py-2 rounded-xl bg-yellow-600/20 text-yellow-500 text-[9px] font-black uppercase">${window.t('make_pro')}</button>` : `<button onclick="core.modRemovePro('${uid}', '${data.name}')" class="px-4 py-2 rounded-xl bg-orange-600/20 text-orange-400 text-[9px] font-black uppercase">${window.t('remove_pro')}</button>`}</div>` : '<div class="text-[8px] text-purple-400 font-black">MAKER</div>'}</div></div></div>`;
         }
       },
-
       async modBanUser(uid, name, isBanned) { if(await this.ask(isBanned ? window.t('unban_q') : window.t('ban_q'))) { await update(ref(db, `users/${uid}`), { isBan: !isBanned }); addModLog(isBanned ? 'UNBAN' : 'BAN', uid, name); this.notify(window.t('status_updated')); this.renderModUsers(); } },
-      async modMakeAdmin(uid, name) { if(await this.ask(`MAKE ${name} ADMIN?`)) { await update(ref(db, `users/${uid}`), { isAdmin: true, isPro: false }); addModLog('MAKE_ADMIN', uid, name); this.notify(`${name} IS NOW ADMIN`); this.renderModUsers(); } },
+      async modMakeAdmin(uid, name) { if(await this.ask(`MAKE ${name} ADMIN?`)) { await update(ref(db, `users/${uid}`), { isAdmin: true }); addModLog('MAKE_ADMIN', uid, name); this.notify(`${name} IS NOW ADMIN`); this.renderModUsers(); } },
       async modRemoveAdmin(uid, name) { if(await this.ask(`REMOVE ADMIN FROM ${name}?`)) { await update(ref(db, `users/${uid}`), { isAdmin: false }); addModLog('REMOVE_ADMIN', uid, name); this.notify(`${name} IS NO LONGER ADMIN`); this.renderModUsers(); } },
-      async modMakePro(uid, name) { if(await this.ask(`MAKE ${name} PRO? (expires in 30 days)`)) { await update(ref(db, `users/${uid}`), { isPro: true, isAdmin: false, proGrantedAt: Date.now() }); addModLog('MAKE_PRO', uid, name); this.notify(`${name} IS NOW PRO PLAYER (30 days)`); this.renderModUsers(); } },
+      async modMakePro(uid, name) { if(await this.ask(`MAKE ${name} PRO? (expires in 30 days)`)) { await update(ref(db, `users/${uid}`), { isPro: true, proGrantedAt: Date.now() }); addModLog('MAKE_PRO', uid, name); this.notify(`${name} IS NOW PRO PLAYER (30 days)`); this.renderModUsers(); } },
       async modRemovePro(uid, name) { if(await this.ask(`REMOVE PRO FROM ${name}?`)) { await update(ref(db, `users/${uid}`), { isPro: false, proGrantedAt: null }); addModLog('REMOVE_PRO', uid, name); this.notify(`${name} PRO REMOVED`); this.renderModUsers(); } },
-
-      async renderModTournaments() {
+      
+      async renderModTournaments() { 
         const container = document.getElementById('mod-tournaments-list');
         if (!container) return;
         const tSnap = await get(ref(db, 'tourneys'));
@@ -465,25 +419,26 @@
           container.innerHTML += `<div class="bg-white/5 p-5 rounded-2xl border border-white/10 mb-3"><div class="flex justify-between items-start flex-wrap gap-3"><div><div class="text-lg font-black italic uppercase text-white">${data.name}</div><div class="text-[8px] opacity-30 mt-1">${data.code} | ${data.format} | ${alphaCount}+${omegaCount} players</div></div><div class="flex gap-2"><button onclick="core.openLobby('${tid}')" class="px-4 py-2 rounded-xl bg-blue-600/20 text-blue-400 text-[9px] font-black uppercase">VIEW</button><button onclick="core.modForceFinish('${tid}', '${data.name}')" class="px-4 py-2 rounded-xl bg-red-600/20 text-red-500 text-[9px] font-black uppercase">${window.t('force_finish')}</button><button onclick="core.deleteTourney('${tid}')" class="px-4 py-2 rounded-xl bg-white/10 text-white/40 text-[9px] font-black uppercase">${window.t('delete_event')}</button></div></div></div>`;
         }
       },
-
       async modForceFinish(tid, name) { if(await this.ask(`FORCE FINISH ${name}?`)) { const tSnap = await get(ref(db, `tourneys/${tid}`)); const t = tSnap.val(); if (t && t.alpha && t.omega) { for (const uid of Object.keys(t.alpha)) { await update(ref(db, `users/${uid}`), { exr: increment(25), wins: increment(1) }); } for (const uid of Object.keys(t.omega)) { await update(ref(db, `users/${uid}`), { exr: increment(-15), losses: increment(1) }); } } await remove(ref(db, `tourneys/${tid}`)); await remove(ref(db, `chats/${tid}`)); addModLog('FORCE_FINISH_TOURNAMENT', null, null, name); this.notify(`TOURNAMENT ${name} FORCE FINISHED`); this.renderModTournaments(); this.loadList(); } },
-
-      async renderModReports() {
+      
+      async renderModReports() { 
         const container = document.getElementById('mod-reports-list');
         if (!container) return;
         const rSnap = await get(ref(db, 'reports'));
         const reports = rSnap.val() || {};
         container.innerHTML = '';
-        if (Object.keys(reports).length === 0) { container.innerHTML = `<div class="text-center py-10 text-[8px] opacity-30 uppercase">${window.t('no_reports')}</div>`; return; }
+        if (Object.keys(reports).length === 0) { 
+          container.innerHTML = `<div class="text-center py-10 text-[8px] opacity-30 uppercase">${window.t('no_reports')}</div>`; 
+          return; 
+        }
         for (const [rid, data] of Object.entries(reports)) {
           container.innerHTML += `<div class="bg-white/5 p-5 rounded-2xl border border-white/10 mb-3"><div class="flex justify-between items-start flex-wrap gap-3"><div class="flex-1"><div class="text-[10px] font-black uppercase text-red-400">${data.reporterName} → ${data.reportedName}</div><div class="text-[9px] opacity-60 mt-2">${data.reason}</div><div class="text-[7px] opacity-20 mt-1">${new Date(data.timestamp).toLocaleString()}</div></div><div class="flex gap-2"><button onclick="core.modResolveReport('${rid}', '${data.reportedUid}', '${data.reportedName}')" class="px-4 py-2 rounded-xl bg-green-600/20 text-green-500 text-[9px] font-black uppercase">BAN & RESOLVE</button><button onclick="core.modDismissReport('${rid}')" class="px-4 py-2 rounded-xl bg-white/10 text-white/40 text-[9px] font-black uppercase">DISMISS</button></div></div></div>`;
         }
       },
-
       async modResolveReport(rid, reportedUid, reportedName) { await update(ref(db, `users/${reportedUid}`), { isBan: true }); await remove(ref(db, `reports/${rid}`)); addModLog('BAN_FROM_REPORT', reportedUid, reportedName); this.notify(`${reportedName} BANNED FROM REPORT`); this.renderModReports(); this.renderModUsers(); },
       async modDismissReport(rid) { await remove(ref(db, `reports/${rid}`)); this.notify('REPORT DISMISSED'); this.renderModReports(); },
-
-      renderModLogs() {
+      
+      renderModLogs() { 
         const container = document.getElementById('mod-logs-list');
         if (!container) return;
         const logsRef = query(ref(db, 'mod_logs'), limitToLast(100));
@@ -495,8 +450,8 @@
           });
         });
       },
-
-      initModChat() {
+      
+      initModChat() { 
         const container = document.getElementById('mod-chat-box');
         if (!container) return;
         const chatRef = ref(db, 'mod_chat');
@@ -511,16 +466,14 @@
           });
         });
       },
-
       async sendModChat() { const input = document.getElementById('mod-chat-in'); if (!input.value.trim()) return; await push(ref(db, 'mod_chat'), { uid: this.u.uid, name: this.userData.name, msg: input.value.trim(), timestamp: Date.now() }); input.value = ''; },
-
-      async submitReport(targetUid, targetName) { const reason = prompt(window.t('report_reason')); if (!reason) return; await push(ref(db, 'reports'), { reporterUid: this.u.uid, reporterName: this.userData.name, reportedUid: targetUid, reportedName: targetName, reason: reason, timestamp: Date.now() }); this.notify('REPORT SENT TO MODERATORS'); },
 
       async showMini(uid) {
         const s = await get(ref(db, `users/${uid}`)), d = s.val(); if(!d) return;
         const style = this.getUserStyle(d);
         const exr = d.exr || 0;
         const level = this.getExrLevel(exr);
+        const nextExr = this.getExrNext(exr);
         const isOnline = this.isUserOnline(uid);
         const fSnap = await get(ref(db, `friends/${this.u.uid}/${uid}`)), fStatus = fSnap.val();
         let friendBtn = '';
@@ -530,10 +483,52 @@
           else if (fStatus === 'pending_in') friendBtn = `<button onclick="core.addFriend('${uid}')" class="w-full py-4 bg-green-600/20 text-green-500 rounded-2xl text-[8px] font-black uppercase mt-2">${window.t('accept')}</button>`;
           else friendBtn = `<div class="flex gap-2"><button onclick="core.openDm('${uid}', '${d.name}')" class="flex-1 py-4 bg-blue-600/20 text-blue-500 rounded-2xl text-[8px] font-black uppercase mt-2 flex items-center justify-center gap-2">${msgIcon} ${window.t('chat')}</button><button onclick="core.removeFriend('${uid}')" class="w-14 py-4 bg-red-600/10 text-red-500/40 rounded-2xl text-[8px] font-black uppercase mt-2">×</button></div>`;
         }
-        const reportBtn = `<button onclick="core.submitReport('${uid}', '${d.name}')" class="w-full py-4 bg-red-600/20 text-red-500 rounded-2xl text-[8px] font-black uppercase mt-2">⚠ REPORT</button>`;
-        const isMod = this.isModerator();
+        let linksH = d.socials ? `<div class="flex flex-wrap gap-2 justify-center mb-6">${Object.values(d.socials).map(sl => `<a href="${sl.url}" target="_blank" class="bg-white/5 px-3 py-2 rounded-lg text-[7px] font-black text-blue-500 border border-white/5 uppercase">${sl.label}</a>`).join('')}</div>` : '';
+        const isAdmin = this.userData?.isMaker || this.userData?.isAdmin;
+        const banBtn = (isAdmin && !d.isMaker && uid !== this.u.uid) ? `<button onclick="core.modBanUser('${uid}', '${d.name}', ${d.isBan || false})" class="mt-2 w-full py-4 ${d.isBan ? 'bg-green-600/20 text-green-500' : 'bg-red-600/20 text-red-500'} rounded-2xl text-[8px] font-black uppercase tracking-[0.3em]">${d.isBan ? 'UNBAN' : 'BAN'}</button>` : '';
+        const reportBtn = `<button onclick="core.openReportModal('${uid}', '${d.name}')" class="w-full py-4 bg-red-600/20 text-red-500 rounded-2xl text-[8px] font-black uppercase mt-2">⚠ REPORT</button>`;
         const iconId = 'mini-exr-icon-' + Math.random().toString(36).substr(2, 9);
-        document.getElementById('mini-content').innerHTML = `<div class="bg-[#0a0a0a] w-[340px] rounded-[3rem] overflow-hidden border ${d.isBan ? 'border-red-600' : 'border-white/10'} shadow-2xl relative"><div class="h-28 bg-zinc-900 bg-cover bg-center" style="background-image:url(${d.banner||''})"></div><div class="px-8 pb-10 text-center"><div class="relative inline-block"><div class="w-20 h-20 mx-auto -mt-10 mb-4 bg-zinc-800 rounded-[2rem] border-[4px] border-[#0a0a0a] bg-cover bg-center" style="background-image:url(${d.avatar||''})"></div><div class="absolute bottom-2 right-2 w-4 h-4 rounded-full border-2 border-[#0a0a0a] ${isOnline ? 'bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.8)]' : 'bg-gray-500'}"></div></div><h3 class="text-2xl font-black italic uppercase tracking-tighter ${style.class}">${d.name}</h3><p class="text-[7px] font-black opacity-40 tracking-[0.4em] mt-1 mb-4 text-white">${style.sub}</p><div class="flex items-center gap-3 bg-white/5 px-4 py-2 rounded-xl border border-white/5 mb-6"><div class="text-[10px] font-black text-blue-500 italic truncate flex-1">${uid}</div><button onclick="core.copyId('${uid}')" class="bg-white/10 px-3 py-1 rounded-lg text-[7px] font-black uppercase text-white active:scale-95">${window.t('copy')}</button></div><div class="bg-white/5 p-6 rounded-[2rem] border border-white/5 w-full mb-4"><div class="flex items-center gap-3"><div id="${iconId}" class="flex-shrink-0 w-16 h-10 text-blue-500"></div><div class="flex-grow"><div class="flex items-center justify-between"><div><p class="text-2xl font-black text-blue-500">${exr}</p><p class="text-[6px] font-black text-blue-500/50 uppercase">EXR</p></div><div><p class="text-xl font-black text-blue-500">${level.name}</p><p class="text-[6px] opacity-40 uppercase">${this.getExrLevelName(level)}</p></div></div><div class="mt-3 w-full bg-white/5 h-2 rounded-full overflow-hidden"><div class="h-full bg-blue-500" style="width: ${this.getExrProgress(exr)}%"></div></div></div></div></div><div class="grid grid-cols-3 gap-2 mb-4"><div class="bg-white/5 p-4 rounded-2xl"><p class="text-white font-black text-xl">${this.formatHours(d.hours)}</p><p class="text-[6px] opacity-30 uppercase">${window.t('hours')}</p></div><div class="bg-white/5 p-4 rounded-2xl"><p class="text-blue-400 font-black text-xl">${d.wins || 0}</p><p class="text-[6px] opacity-30 uppercase">${window.t('wins')}</p></div><div class="bg-white/5 p-4 rounded-2xl"><p class="text-red-400 font-black text-xl">${d.losses || 0}</p><p class="text-[6px] opacity-30 uppercase">${window.t('losses')}</p></div></div><div class="mt-2 flex flex-col gap-2">${friendBtn}${reportBtn}${isMod && !d.isMaker && uid !== this.u.uid ? `<button onclick="core.modBanUser('${uid}', '${d.name}', ${d.isBan || false})" class="w-full py-4 ${d.isBan ? 'bg-green-600/20 text-green-500' : 'bg-red-600/20 text-red-500'} rounded-2xl text-[8px] font-black uppercase">${d.isBan ? window.t('unban') : window.t('ban')}</button>` : ''}<button onclick="document.getElementById('mini-modal').classList.add('hidden')" class="w-full py-4 bg-white/5 rounded-2xl text-[8px] font-black opacity-40 uppercase text-white">${window.t('close')}</button></div></div></div>`;
+        
+        document.getElementById('mini-content').innerHTML = `<div class="bg-[#0a0a0a] w-[340px] rounded-[3rem] overflow-hidden border ${d.isBan ? 'border-red-600' : 'border-white/10'} shadow-2xl relative">
+          <div class="h-28 bg-zinc-900 bg-cover bg-center" style="background-image:url(${d.banner||''})"></div>
+          <div class="px-8 pb-10 text-center">
+            <div class="relative inline-block">
+              <div class="w-20 h-20 mx-auto -mt-10 mb-4 bg-zinc-800 rounded-[2rem] border-[4px] border-[#0a0a0a] bg-cover bg-center" style="background-image:url(${d.avatar||''})"></div>
+              <div class="absolute bottom-2 right-2 w-4 h-4 rounded-full border-2 border-[#0a0a0a] ${isOnline ? 'bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.8)]' : 'bg-gray-500'}"></div>
+            </div>
+            <h3 class="text-2xl font-black italic uppercase tracking-tighter ${style.class}">${d.name}</h3>
+            <p class="text-[7px] font-black opacity-40 tracking-[0.4em] mt-1 mb-4 text-white">${style.sub}</p>
+            <div class="flex items-center gap-3 bg-white/5 px-4 py-2 rounded-xl border border-white/5 mb-6">
+              <div class="text-[10px] font-black text-blue-500 italic truncate flex-1">${uid}</div>
+              <button onclick="core.copyId('${uid}')" class="bg-white/10 px-3 py-1 rounded-lg text-[7px] font-black uppercase text-white active:scale-95">${window.t('copy')}</button>
+            </div>
+            ${linksH}
+            <div class="bg-white/5 p-6 rounded-[2rem] border border-white/5 w-full mb-4">
+              <div class="flex items-center gap-3">
+                <div id="${iconId}" class="flex-shrink-0 w-16 h-10 text-blue-500"></div>
+                <div class="flex-grow">
+                  <div class="flex items-center justify-between">
+                    <div class="text-left"><p class="text-2xl font-black text-blue-500">${exr}</p><p class="text-[6px] font-black text-blue-500/50 uppercase">EXR</p></div>
+                    <div class="text-right"><p class="text-xl font-black text-blue-500">${level.name}</p><p class="text-[6px] opacity-40 uppercase">${this.getExrLevelName(level)}</p></div>
+                  </div>
+                  <div class="mt-3 w-full bg-white/5 h-2 rounded-full overflow-hidden"><div class="h-full bg-blue-500" style="width: ${this.getExrProgress(exr)}%"></div></div>
+                  <div class="mt-1 text-right"><span class="text-[6px] opacity-40">${window.t('to_next')}: ${nextExr} EXR</span></div>
+                </div>
+              </div>
+            </div>
+            <div class="grid grid-cols-3 gap-2 mb-4">
+              <div class="bg-white/5 p-4 rounded-2xl border border-white/5"><p class="text-white font-black text-xl">${this.formatHours(d.hours)}</p><p class="text-[6px] opacity-30 uppercase mt-1">${window.t('hours')}</p></div>
+              <div class="bg-white/5 p-4 rounded-2xl border border-white/5"><p class="text-blue-400 font-black text-xl">${d.wins || 0}</p><p class="text-[6px] opacity-30 uppercase mt-1">${window.t('wins')}</p></div>
+              <div class="bg-white/5 p-4 rounded-2xl border border-white/5"><p class="text-red-400 font-black text-xl">${d.losses || 0}</p><p class="text-[6px] opacity-30 uppercase mt-1">${window.t('losses')}</p></div>
+            </div>
+            <div class="mt-2 flex flex-col gap-2">
+              ${friendBtn}
+              ${reportBtn}
+              ${banBtn}
+              <button onclick="document.getElementById('mini-modal').classList.add('hidden')" class="w-full py-4 bg-white/5 rounded-2xl text-[8px] font-black opacity-40 uppercase text-white">${window.t('close')}</button>
+            </div>
+          </div>
+        </div>`;
         document.getElementById('mini-modal').classList.remove('hidden');
         setTimeout(() => this.renderExrIcon(level.level, iconId), 50);
       },
@@ -544,30 +539,44 @@
         off(uRef);
         onValue(uRef, (s) => {
           const d = s.val(); if(!d) return;
-          const isMy = uid === this.u.uid, style = this.getUserStyle(d);
+          const isMy = uid === this.u.uid, style = this.getUserStyle(d), banner = document.getElementById('p-banner');
           const exr = d.exr || 0;
           const level = this.getExrLevel(exr);
           const nextExr = this.getExrNext(exr);
           const isOnline = this.isUserOnline(uid);
-          document.getElementById('p-banner').style.backgroundImage = d.banner ? `url(${d.banner})` : 'none';
-          if(isMy) { document.getElementById('p-banner').onclick = () => document.getElementById('bi-set').click(); document.getElementById('p-banner').classList.add('cursor-pointer'); }
+          banner.style.backgroundImage = d.banner ? `url(${d.banner})` : 'none';
+          if(isMy) { banner.onclick = () => document.getElementById('bi-set').click(); banner.classList.add('cursor-pointer'); }
           document.getElementById('p-avatar-wrap').innerHTML = `<div class="relative inline-block"><div id="p-avatar" class="w-32 h-32 md:w-48 md:h-48 bg-zinc-800 border-[8px] border-[#060606] bg-cover bg-center rounded-[2.5rem] relative z-10" style="background-image:url(${d.avatar||''})" onclick="if(${isMy}) document.getElementById('ai-set').click()"></div><div class="absolute bottom-2 right-2 w-5 h-5 md:w-6 md:h-6 rounded-full border-2 border-[#060606] ${isOnline ? 'bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.8)]' : 'bg-gray-500'}"></div></div>`;
           document.getElementById('p-name-container').innerHTML = `<div class="flex items-center gap-4 flex-wrap"><h2 class="text-4xl md:text-8xl font-black italic uppercase tracking-tighter ${style.class} leading-none">${d.name}</h2>${isMy ? `<button onclick="core.openEditName()" class="w-10 h-10 bg-white/5 border border-white/10 rounded-2xl flex items-center justify-center opacity-30 text-white">✎</button>` : ''}</div>`;
           document.getElementById('p-sub-container').innerHTML = `<div class="flex flex-col md:flex-row md:items-center gap-4 mt-4"><p class="text-[10px] font-black opacity-20 tracking-[0.5em] uppercase text-white">${style.sub}</p><div class="flex items-center gap-3 bg-white/5 px-4 py-2 rounded-xl border border-white/5 max-w-fit"><div class="text-[10px] font-black text-blue-500 italic truncate">${uid}</div><button onclick="core.copyId('${uid}')" class="bg-white/10 px-3 py-1 rounded-lg text-[7px] font-black uppercase text-white active:scale-95">${window.t('copy')}</button></div></div>`;
-          document.getElementById('p-exr-container').innerHTML = `<div class="bg-white/5 p-8 rounded-[2rem] border border-white/5 w-full"><div class="flex items-center gap-4"><div id="exr-mini-icon" class="flex-shrink-0"></div><div class="flex-grow"><div class="flex items-center justify-between"><div><p class="text-5xl font-black text-blue-500">${exr}</p><p class="text-[8px] font-black text-blue-500/50 uppercase">EXR</p></div><div><p class="text-3xl font-black text-blue-500">${level.name}</p><p class="text-[8px] opacity-40 uppercase">${this.getExrLevelName(level)}</p></div></div><div class="mt-6 w-full bg-white/5 h-3 rounded-full overflow-hidden"><div class="h-full bg-blue-500" style="width: ${this.getExrProgress(exr)}%"></div></div><div class="mt-2 text-right"><span class="text-[8px] opacity-40">${window.t('to_next')}: ${nextExr} EXR</span></div></div></div></div>`;
+          document.getElementById('p-exr-container').innerHTML = `<div class="bg-white/5 p-8 rounded-[2rem] border border-white/5 w-full relative overflow-visible"><div class="flex items-center gap-4"><div id="exr-mini-icon" class="flex-shrink-0"></div><div class="flex-grow"><div class="flex items-center justify-between"><div><p class="text-5xl font-black text-blue-500">${exr}</p><p class="text-[8px] font-black text-blue-500/50 uppercase">EXR</p></div><div class="text-right"><p class="text-3xl font-black text-blue-500">${level.name}</p><p class="text-[8px] opacity-40 uppercase">${this.getExrLevelName(level)}</p></div></div><div class="mt-6 w-full bg-white/5 h-3 rounded-full overflow-hidden"><div class="h-full bg-blue-500" style="width: ${this.getExrProgress(exr)}%"></div></div><div class="mt-2 text-right"><span class="text-[8px] opacity-40">${window.t('to_next')}: ${nextExr} EXR</span></div></div></div></div>`;
           document.getElementById('p-wins').innerText = d.wins || 0;
           document.getElementById('p-losses').innerText = d.losses || 0;
-          document.getElementById('p-hours').innerText = this.formatHours(d.hours);
           setTimeout(() => this.renderExrIcon(level.level, 'exr-mini-icon'), 100);
+          document.getElementById('p-hours').innerText = this.formatHours(d.hours);
           const lb = document.getElementById('p-links'); lb.innerHTML = '';
-          if(d.socials) Object.entries(d.socials).forEach(([id, sl]) => { lb.innerHTML += `<div class="bg-white/5 p-5 border border-white/5 mb-3 flex justify-between items-center rounded-[1.5rem]"><div><div class="text-[8px] opacity-30 font-black uppercase text-white">${sl.label}</div><a href="${sl.url}" target="_blank" class="text-blue-500 font-bold text-xs uppercase truncate block">URL</a></div>${isMy ? `<div class="flex gap-2"><button onclick="core.openLinkEdit('${id}', '${sl.label}', '${sl.url}')" class="w-10 h-10 bg-white/5 rounded-xl text-[10px] opacity-20 hover:opacity-100">✎</button><button onclick="core.deleteLink('${id}')" class="w-10 h-10 bg-white/5 rounded-xl text-[14px] opacity-20 hover:opacity-100 hover:text-red-500">×</button></div>` : ''}</div>`; });
+          if(d.socials) Object.entries(d.socials).forEach(([id, sl]) => {
+              lb.innerHTML += `<div class="bg-white/5 p-5 border border-white/5 mb-3 flex justify-between items-center rounded-[1.5rem]"><div class="overflow-hidden"><div class="text-[8px] opacity-30 font-black uppercase text-white">${sl.label}</div><a href="${sl.url}" target="_blank" class="text-blue-500 font-bold text-xs uppercase truncate block">URL</a></div>${isMy ? `<div class="flex gap-2"><button onclick="core.openLinkEdit('${id}', '${sl.label}', '${sl.url}')" class="w-10 h-10 bg-white/5 rounded-xl text-[10px] opacity-20 hover:opacity-100">✎</button><button onclick="core.deleteLink('${id}')" class="w-10 h-10 bg-white/5 rounded-xl text-[14px] opacity-20 hover:opacity-100 hover:text-red-500">×</button></div>` : ''}</div>`;
+          });
           if(isMy) {
             let shopH = `<div class="mt-8 pt-8 border-t border-white/5"><button onclick="core.openLinkEdit()" class="w-full bg-white/5 py-4 font-black uppercase text-[8px] rounded-2xl border border-white/5 text-white/40 mb-10">${window.t('add_link')}</button>`;
-            shopH += `<div class="mb-10 space-y-6"><div class="p-8 bg-yellow-500/5 border border-yellow-500/10 rounded-[2.5rem]"><div class="text-[8px] font-black text-yellow-500 tracking-[0.4em] mb-6 uppercase italic">${window.t('pro_service')}</div><div class="grid grid-cols-1 md:grid-cols-2 gap-3"><a href="https://www.sberbank.ru/ru/choise_bank?requisiteNumber=79192892667&bankCode=100000000111" target="_blank" class="bg-yellow-500 py-4 rounded-2xl text-black font-black text-[10px] text-center uppercase">${window.t('sber')}</a><a href="http://t.me/ARENAexeSUPPORT?direct" target="_blank" class="bg-white/10 py-4 rounded-2xl text-white font-black text-[10px] text-center">${window.t('support')}</a></div></div><div class="p-8 bg-red-600/5 border border-red-600/10 rounded-[2.5rem]"><div class="text-[8px] font-black text-red-600 tracking-[0.4em] mb-6 uppercase italic">${window.t('become_admin')}</div><a href="http://t.me/ARENAexeSUPPORT?direct" target="_blank" class="w-full block bg-red-600 py-4 rounded-2xl text-white font-black text-[10px] text-center">${window.t('contact_owner')}</a></div></div>`;
+            shopH += `<div class="mb-10 space-y-6"><div class="p-8 bg-yellow-500/5 border border-yellow-500/10 rounded-[2.5rem] relative overflow-hidden group"><div class="text-[8px] font-black text-yellow-500 tracking-[0.4em] mb-6 uppercase italic">${window.t('pro_service')}</div><div class="grid grid-cols-1 md:grid-cols-2 gap-3"><a href="https://www.sberbank.ru/ru/choise_bank?requisiteNumber=79192892667&bankCode=100000000111" target="_blank" class="bg-yellow-500 py-4 rounded-2xl text-black font-black text-[10px] text-center uppercase">${window.t('sber')}</a><a href="http://t.me/ARENAexeSUPPORT?direct" target="_blank" class="bg-white/10 py-4 rounded-2xl text-white font-black text-[10px] text-center">${window.t('support')}</a></div></div><div class="p-8 bg-red-600/5 border border-red-600/10 rounded-[2.5rem] relative overflow-hidden group"><div class="text-[8px] font-black text-red-600 tracking-[0.4em] mb-6 uppercase italic">${window.t('become_admin')}</div><a href="http://t.me/ARENAexeSUPPORT?direct" target="_blank" class="w-full block bg-red-600 py-4 rounded-2xl text-white font-black text-[10px] text-center uppercase">${window.t('contact_owner')}</a></div></div>`;
             document.getElementById('p-edit-controls').innerHTML = shopH + `</div>`;
             document.getElementById('p-edit-controls').classList.remove('hidden');
           }
           document.getElementById('p-logout-btn').classList.toggle('hidden', !isMy);
+        });
+      },
+
+      loadList() {
+        const tRef = ref(db, 'tourneys');
+        off(tRef);
+        onValue(tRef, (snap) => {
+          const g = document.getElementById('tourney-grid'); g.innerHTML = '';
+          const data = snap.val(); if(!data) return;
+          Object.entries(data).reverse().forEach(([id, t]) => {
+            g.innerHTML += `<div onclick="core.openLobby('${id}')" class="bg-[#0d0d0d] border border-white/5 hover:border-blue-600 rounded-[2.5rem] overflow-hidden group cursor-pointer transition-all"><div class="h-56 bg-zinc-900 bg-cover bg-center group-hover:scale-105 transition duration-700" style="background-image:url(${t.cover || ''})"></div><div class="p-8 flex justify-between items-start"><div><h3 class="text-2xl font-black italic uppercase tracking-tighter leading-none text-white">${t.name}</h3><div class="mt-4"><p class="text-[9px] text-blue-500 font-black uppercase tracking-widest">${window.t('format')}: ${t.format} • ${window.t('prize')}: ${t.prize}</p></div></div><div class="text-right"><div class="text-[9px] font-black text-white/20 mb-1">${t.code}</div><div class="text-[8px] opacity-10 font-black uppercase text-white">${t.date}</div></div></div></div>`;
+          });
         });
       },
 
@@ -580,17 +589,17 @@
           const ownerSnap = await get(ref(db, `users/${t.owner}`)), ownerData = ownerSnap.val(), ownerStyle = this.getUserStyle(ownerData);
           document.getElementById('l-cover').style.backgroundImage = `url(${t.cover || ''})`;
           const isAdmin = this.userData?.isMaker || this.userData?.isAdmin || t.owner === this.u.uid;
-          document.getElementById('ln-container').innerHTML = `<h1 class="text-5xl font-black uppercase italic tracking-tighter text-white">${t.name}</h1>${isAdmin ? `<button onclick="core.openEditTourney()" class="w-10 h-10 bg-white/5 border border-white/10 rounded-2xl flex items-center justify-center opacity-30 text-white">✎</button>` : ''}`;
+          document.getElementById('ln-container').innerHTML = `<h1 id="ln" class="text-5xl font-black uppercase italic tracking-tighter text-white">${t.name}</h1>${isAdmin ? `<button onclick="core.openEditTourney()" class="w-10 h-10 bg-white/5 border border-white/10 rounded-2xl flex items-center justify-center opacity-30 text-white">✎</button>` : ''}`;
           document.getElementById('l-code-text').innerText = t.code;
           document.getElementById('lp').innerText = `${window.t('prize')}: ${t.prize} | ${window.t('format')}: ${t.format}`;
           document.getElementById('l-owner').innerHTML = `<span class="opacity-20 mr-2">${window.t('by')}</span><span onclick="core.showMini('${t.owner}')" class="cursor-pointer hover:opacity-100 ${ownerStyle.class}">${ownerData?.name || '...'}</span>`;
           const isMember = (t.alpha && t.alpha[this.u.uid]) || (t.omega && t.omega[this.u.uid]);
-          document.getElementById('l-link-box').innerHTML = (t.link && (isMember || isAdmin)) ? `<div class="flex gap-2"><button onclick="core.openSecurityLink('${t.link}')" class="bg-white/5 border border-white/10 w-12 h-12 flex items-center justify-center rounded-xl text-white/40"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg></button><a href="${t.link}" target="_blank" class="bg-blue-600 px-6 py-3 rounded-xl text-[9px] font-black tracking-widest text-white">${window.t('connect')}</a></div>` : '';
+          document.getElementById('l-link-box').innerHTML = (t.link && (isMember || isAdmin)) ? `<div class="flex gap-2"><button onclick="core.openSecurityLink('${t.link}')" class="bg-white/5 border border-white/10 w-12 h-12 flex items-center justify-center rounded-xl text-white/40 hover:text-blue-500 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg></button><a href="${t.link}" target="_blank" class="bg-blue-600 px-6 py-3 rounded-xl text-[9px] font-black tracking-widest text-white flex items-center">${window.t('connect')}</a></div>` : '';
           document.getElementById('ldesc').innerText = t.desc;
           document.getElementById('lobby-controls').innerHTML = isAdmin ? `<button onclick="core.deleteTourney('${tid}')" class="text-[9px] text-red-500 font-black uppercase opacity-30">${window.t('delete_event')}</button>` : '';
           const finishBtnContainer = document.getElementById('finish-btn-container');
           if (isAdmin && t.alpha && t.omega && Object.keys(t.alpha).length > 0 && Object.keys(t.omega).length > 0) {
-            finishBtnContainer.innerHTML = `<div class="w-full mt-6 mb-8"><button onclick="core.askFinish()" class="w-full bg-red-600 py-8 rounded-2xl font-black text-[14px] uppercase tracking-widest text-white border-2 border-red-500 shadow-[0_0_30px_rgba(220,38,38,0.5)]">${window.t('finish_match')}</button></div>`;
+            finishBtnContainer.innerHTML = `<div class="w-full mt-6 mb-8"><button onclick="core.askFinish()" class="w-full bg-red-600 py-8 rounded-2xl font-black text-[14px] uppercase tracking-widest text-white border-2 border-red-500 shadow-[0_0_30px_rgba(220,38,38,0.5)] hover:scale-[1.02] transition-all duration-300">${window.t('finish_match')}</button></div>`;
           } else { finishBtnContainer.innerHTML = ''; }
           this.renderTeam('alpha', t.alpha, t.format, t.status || 'open'); 
           this.renderTeam('omega', t.omega, t.format, t.status || 'open');
@@ -605,7 +614,7 @@
           for (const [uid, name] of Object.entries(p)) {
             const s = await get(ref(db, `users/${uid}`)), st = this.getUserStyle(s.val());
             const isOnline = this.isUserOnline(uid);
-            h += `<div onclick="core.showMini('${uid}')" class="relative bg-white/5 p-5 border-l-4 ${side==='alpha'?'border-blue-600':'border-red-600'} mb-3 text-xs font-black uppercase italic rounded-[1.2rem] flex justify-between items-center"><div class="flex items-center gap-2"><div class="relative"><div class="w-2 h-2 rounded-full ${isOnline ? 'bg-green-500' : 'bg-gray-500'}"></div></div><span class="${st.class}">${name}</span></div>${uid === this.u.uid && status === 'open' ? `<div onclick="event.stopPropagation(); core.leaveTeam('${side}')" class="bg-red-500/10 text-red-500 px-3 py-1 rounded-lg text-[7px] border border-red-500/20 font-black">LEAVE</div>` : ''}</div>`;
+            h += `<div onclick="core.showMini('${uid}')" class="relative bg-white/5 p-5 border-l-4 ${side==='alpha'?'border-blue-600':'border-red-600'} mb-3 text-xs font-black uppercase italic rounded-[1.2rem] flex justify-between items-center"><div class="flex items-center gap-2"><div class="relative"><div class="w-2 h-2 rounded-full ${isOnline ? 'bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.8)]' : 'bg-gray-500'}"></div></div><span class="${st.class}">${name}</span></div>${uid === this.u.uid && status === 'open' ? `<div onclick="event.stopPropagation(); core.leaveTeam('${side}')" class="bg-red-500/10 text-red-500 px-3 py-1 rounded-lg text-[7px] border border-red-500/20 font-black">LEAVE</div>` : ''}</div>`;
           }
         }
         for(let i=count; i<limit; i++) h += `<div onclick="core.join('${side}')" class="border border-dashed border-white/5 p-5 mb-3 text-center opacity-20 text-[8px] font-black uppercase cursor-pointer rounded-[1.2rem] hover:opacity-100 text-white">${window.t('vacant')}</div>`;
@@ -614,8 +623,6 @@
 
       async login() { const n = document.getElementById('an').value.toLowerCase().trim(), p = document.getElementById('ap').value; signInWithEmailAndPassword(auth, n + "@arena.exe", p).catch(() => this.notify(window.t('access_denied'), "err")); },
       async register() { const n = document.getElementById('an').value.trim(), p = document.getElementById('ap').value; createUserWithEmailAndPassword(auth, n.toLowerCase() + "@arena.exe", p).then(async (c) => { await set(ref(db, 'users/' + c.user.uid), { uid: c.user.uid, name: n.toUpperCase(), exr: 0, wins: 0, losses: 0, hours: 0, isMaker: false, isBan: false, lastSeen: Date.now() }); }).catch(() => this.notify(window.t('reg_err'), "err")); },
-      
-      async loadList() { const tRef = ref(db, 'tourneys'); off(tRef); onValue(tRef, (snap) => { const g = document.getElementById('tourney-grid'); g.innerHTML = ''; const data = snap.val(); if(!data) return; Object.entries(data).reverse().forEach(([id, t]) => { g.innerHTML += `<div onclick="core.openLobby('${id}')" class="bg-[#0d0d0d] border border-white/5 hover:border-blue-600 rounded-[2.5rem] overflow-hidden group cursor-pointer transition-all"><div class="h-56 bg-zinc-900 bg-cover bg-center group-hover:scale-105 transition duration-700" style="background-image:url(${t.cover || ''})"></div><div class="p-8 flex justify-between items-start"><div><h3 class="text-2xl font-black italic uppercase tracking-tighter leading-none text-white">${t.name}</h3><div class="mt-4"><p class="text-[9px] text-blue-500 font-black uppercase tracking-widest">${window.t('format')}: ${t.format} • ${window.t('prize')}: ${t.prize}</p></div></div><div class="text-right"><div class="text-[9px] font-black text-white/20 mb-1">${t.code}</div><div class="text-[8px] opacity-10 font-black uppercase text-white">${t.date}</div></div></div></div>`; }); }); },
       
       initGlobalListeners() { onChildAdded(ref(db, `friends/${this.u.uid}`), (snap) => { if (!isInitialLoad && snap.val() === 'pending_in') this.notify(window.t('friend_req')); }); onChildAdded(ref(db, `direct_messages`), (snap) => { const chatId = snap.key; if (chatId.includes(this.u.uid)) { onChildAdded(query(ref(db, `direct_messages/${chatId}`), limitToLast(1)), (mSnap) => { if (!isInitialLoad && mSnap.val().uid !== this.u.uid && currentDmId !== chatId) this.notify(window.t('msg_notif')); }); } }); setTimeout(() => { isInitialLoad = false; }, 2000); }
     };
@@ -626,8 +633,7 @@
     onAuthStateChanged(auth, (user) => {
       if(user) {
         onValue(ref(db, `users/${user.uid}`), (s) => { 
-          const d = s.val(); 
-          if (d && d.isBan) { signOut(auth).then(() => { localStorage.clear(); location.reload(); }); return; }
+          const d = s.val(); if (d && d.isBan) { signOut(auth).then(() => { localStorage.clear(); location.reload(); }); return; }
           window.core.u = user; window.core.userData = d;
           document.getElementById('auth-screen').classList.add('hidden');
           document.getElementById('nav-avatar').style.backgroundImage = d?.avatar ? `url(${d.avatar})` : 'none';
@@ -672,233 +678,46 @@
     .apk-btn { background: #3ddc84; color: #000; border-radius: 1.2rem; font-size: 9px; text-transform: uppercase; letter-spacing: 0.1em; transition: all 0.2s; }
     .lang-btn { background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.1); padding: 8px 16px; border-radius: 1rem; font-size: 10px; font-weight: 900; color: #3b82f6; cursor: pointer; }
     .yandex-border { border: 4px solid #ffc000; border-radius: 1.25rem; overflow: hidden; box-shadow: 0 0 20px rgba(255, 192, 0, 0.3); }
-    #p-logout-btn { background: #dc2626 !important; border: 1px solid #991b1b !important; color: white !important; font-weight: 900; text-transform: uppercase; letter-spacing: 0.15em; transition: all 0.2s; }
+    #p-logout-btn { background: #dc2626 !important; border: 1px solid #991b1b !important; color: white !important; font-weight: 900; text-transform: uppercase; letter-spacing: 0.15em; transition: all 0.2s; cursor: pointer; }
     #p-logout-btn:hover { background: #b91c1c !important; transform: scale(1.02); }
     .exe-blue { color: #3b82f6 !important; font-weight: 900; }
     .mod-tab { cursor: pointer; transition: all 0.2s; }
     .mod-tab.active { border-bottom-color: #3b82f6 !important; color: #3b82f6 !important; }
-    
-    /* Стили для голосовых сообщений */
-    .voice-message {
-      background: rgba(59, 130, 246, 0.1);
-      border: 1px solid rgba(59, 130, 246, 0.2);
-      border-radius: 1rem;
-      padding: 12px;
-      min-width: 240px;
-      transition: all 0.2s;
-    }
-    .voice-message:hover {
-      background: rgba(59, 130, 246, 0.15);
-      border-color: rgba(59, 130, 246, 0.4);
-    }
-    .voice-play-btn {
-      width: 36px;
-      height: 36px;
-      border-radius: 50%;
-      background: #3b82f6;
-      border: none;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      transition: all 0.2s;
-      flex-shrink: 0;
-    }
-    .voice-play-btn:hover {
-      transform: scale(1.05);
-      background: #2563eb;
-      box-shadow: 0 0 12px rgba(59, 130, 246, 0.5);
-    }
-    .voice-waveform {
-      display: flex;
-      align-items: center;
-      gap: 3px;
-      height: 36px;
-    }
-    .wave-bar {
-      width: 4px;
-      background: #3b82f6;
-      border-radius: 2px;
-      transition: height 0.05s ease;
-    }
-    .voice-progress-container {
-      cursor: pointer;
-      margin-top: 6px;
-    }
-    .voice-progress-track {
-      position: relative;
-      width: 100%;
-      height: 4px;
-      background: rgba(255, 255, 255, 0.2);
-      border-radius: 2px;
-      overflow: hidden;
-    }
-    .voice-progress-fill {
-      position: absolute;
-      left: 0;
-      top: 0;
-      height: 100%;
-      background: #3b82f6;
-      border-radius: 2px;
-      width: 0%;
-      transition: width 0.1s linear;
-    }
-    .voice-time {
-      display: flex;
-      justify-content: space-between;
-      margin-top: 4px;
-      font-size: 9px;
-      font-weight: 600;
-      opacity: 0.5;
-    }
+    .voice-message { background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.2); border-radius: 1rem; padding: 12px; min-width: 240px; transition: all 0.2s; }
+    .voice-message:hover { background: rgba(59, 130, 246, 0.15); border-color: rgba(59, 130, 246, 0.4); }
+    .voice-play-btn { width: 36px; height: 36px; border-radius: 50%; background: #3b82f6; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.2s; flex-shrink: 0; }
+    .voice-play-btn:hover { transform: scale(1.05); background: #2563eb; box-shadow: 0 0 12px rgba(59, 130, 246, 0.5); }
+    .voice-waveform { display: flex; align-items: center; gap: 3px; height: 36px; }
+    .wave-bar { width: 4px; background: #3b82f6; border-radius: 2px; transition: height 0.05s ease; }
+    .voice-progress-container { cursor: pointer; margin-top: 6px; }
+    .voice-progress-track { position: relative; width: 100%; height: 4px; background: rgba(255, 255, 255, 0.2); border-radius: 2px; overflow: hidden; }
+    .voice-progress-fill { position: absolute; left: 0; top: 0; height: 100%; background: #3b82f6; border-radius: 2px; width: 0%; transition: width 0.1s linear; }
+    .voice-time { display: flex; justify-content: space-between; margin-top: 4px; font-size: 9px; font-weight: 600; opacity: 0.5; }
+    .mod-search-input { background: #111 !important; border: 1px solid #333 !important; border-radius: 2rem; padding: 12px 16px; color: white; font-size: 12px; width: 100%; margin-bottom: 16px; }
   </style>
 </head>
 <body class="p-4 md:p-10">
   <div id="notif-container" class="fixed top-8 right-8 z-[1000000] w-full max-w-xs pointer-events-none"></div>
   
   <header class="flex justify-between items-center mb-12 pb-8 border-b border-white/5 max-w-[1200px] mx-auto">
-    <div onclick="core.show('home')" class="text-3xl font-black italic cursor-pointer tracking-tighter uppercase text-white">
-      ARENA<span class="exe-blue">.EXE</span>
-    </div>
+    <div onclick="core.show('home')" class="text-3xl font-black italic cursor-pointer tracking-tighter uppercase text-white">ARENA<span class="exe-blue">.EXE</span></div>
     <div class="flex items-center gap-4">
       <button onclick="window.toggleLang()" class="lang-btn">RU | EN</button>
-      <button id="nav-mod" onclick="core.show('mod')" class="hidden bg-red-600/20 text-red-500 w-12 h-12 rounded-xl flex items-center justify-center hover:bg-red-600/30 transition-all">
-        <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M12 2L3 7v8c0 5 9 7 9 7s9-2 9-7V7l-9-5z"/>
-          <path d="M9 12l2 2 4-4"/>
-        </svg>
-      </button>
+      <button id="nav-mod" onclick="core.show('mod')" class="hidden bg-red-600/20 text-red-500 w-12 h-12 rounded-xl flex items-center justify-center hover:bg-red-600/30 transition-all"><svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L3 7v8c0 5 9 7 9 7s9-2 9-7V7l-9-5z"/><path d="M9 12l2 2 4-4"/></svg></button>
       <div id="nav-avatar" onclick="core.show('profile')" class="w-16 h-16 bg-zinc-900 bg-cover bg-center border-2 border-white/10 rounded-[1.5rem] cursor-pointer shadow-lg shadow-blue-600/10"></div>
     </div>
   </header>
 
   <main class="max-w-[1200px] mx-auto">
-    <!-- HOME SECTION -->
-    <section id="section-home" class="section">
-      <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-10">
-        <div><h1 class="text-[9px] font-black opacity-30 tracking-[0.6em] uppercase text-white" data-i18n="discover">DISCOVER</h1></div>
-        <div class="flex gap-4 w-full md:w-auto items-start overflow-x-auto pb-2 custom-scroll">
-          <div class="flex flex-col gap-2 w-20 shrink-0"><input id="search-in" placeholder="AX" maxlength="6" class="!p-2 text-center h-12 !text-[9px]"><div onclick="core.findByCode()" class="bg-white/5 h-12 rounded-xl border border-white/10 flex items-center justify-center cursor-pointer hover:bg-blue-600/20 active:scale-95"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="2.5"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"></path><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"></path><path d="M4 22h16"></path><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"></path><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"></path><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"></path></svg></div></div>
-          <div class="flex flex-col gap-2 w-20 shrink-0"><input id="user-search-in" placeholder="ID" class="!p-2 text-center h-12 !text-[9px]"><div onclick="core.findUser()" class="bg-white/5 h-12 rounded-xl border border-white/10 flex items-center justify-center cursor-pointer hover:bg-blue-600/20 active:scale-95"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="2.5"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg></div></div>
-          <button onclick="document.getElementById('create-modal').classList.remove('hidden')" class="bg-blue-600 px-8 h-[104px] font-black uppercase text-[10px] rounded-[1.2rem] text-white active:scale-95" data-i18n="create">CREATE</button>
-        </div>
-      </div>
-      <div id="tourney-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-10"></div>
-    </section>
+    <section id="section-home" class="section"><div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-10"><div><h1 class="text-[9px] font-black opacity-30 tracking-[0.6em] uppercase text-white" data-i18n="discover">DISCOVER</h1></div><div class="flex gap-4 w-full md:w-auto items-start overflow-x-auto pb-2 custom-scroll"><div class="flex flex-col gap-2 w-20 shrink-0"><input id="search-in" placeholder="AX" maxlength="6" class="!p-2 text-center h-12 !text-[9px]"><div onclick="core.findByCode()" class="bg-white/5 h-12 rounded-xl border border-white/10 flex items-center justify-center cursor-pointer hover:bg-blue-600/20 active:scale-95"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="2.5"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"></path><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"></path><path d="M4 22h16"></path><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"></path><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"></path><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"></path></svg></div></div><div class="flex flex-col gap-2 w-20 shrink-0"><input id="user-search-in" placeholder="ID / NAME" class="!p-2 text-center h-12 !text-[9px]"><div onclick="core.findUser()" class="bg-white/5 h-12 rounded-xl border border-white/10 flex items-center justify-center cursor-pointer hover:bg-blue-600/20 active:scale-95"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="2.5"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg></div></div><button onclick="document.getElementById('create-modal').classList.remove('hidden')" class="bg-blue-600 px-8 h-[104px] font-black uppercase text-[10px] rounded-[1.2rem] text-white active:scale-95" data-i18n="create">CREATE</button></div></div><div id="tourney-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-10"></div></section>
 
-    <!-- PROFILE SECTION -->
-    <section id="section-profile" class="section hidden">
-      <div class="bg-[#080808] rounded-[3.5rem] overflow-hidden">
-        <div id="p-banner" class="h-64 md:h-80 bg-zinc-900 bg-cover bg-center relative"><div id="p-avatar-wrap" class="absolute -bottom-12 md:-bottom-16 left-8 md:left-12"></div></div>
-        <input type="file" id="ai-set" class="hidden" accept="image/*" onchange="core.uploadMedia(event, 'avatar')">
-        <input type="file" id="bi-set" class="hidden" accept="image/*" onchange="core.uploadMedia(event, 'banner')">
-        <div class="p-8 md:p-16 pt-20 md:pt-24">
-          <div id="p-name-container"></div><div id="p-sub-container"></div>
-          <div class="grid grid-cols-1 md:grid-cols-3 gap-10 mt-16">
-            <div class="md:col-span-2">
-              <div class="grid grid-cols-2 gap-4">
-                <div id="p-exr-container" class="col-span-2"></div>
-                <div class="bg-white/5 p-8 text-center rounded-[2rem] border border-white/5 col-span-2">
-                  <p id="p-hours" class="text-white font-black italic stats-fit">0H</p>
-                  <p class="text-[8px] opacity-30 uppercase mt-4 text-white" data-i18n="hours">ONLINE</p>
-                </div>
-                <div class="col-span-2">
-                  <div class="grid grid-cols-2 gap-4">
-                    <div class="bg-white/5 p-8 rounded-[2rem] border border-white/5">
-                      <p class="text-blue-400 font-black text-3xl" id="p-wins">0</p>
-                      <p class="text-[8px] opacity-30 uppercase mt-2" data-i18n="wins">WINS</p>
-                    </div>
-                    <div class="bg-white/5 p-8 rounded-[2rem] border border-white/5">
-                      <p class="text-red-400 font-black text-3xl" id="p-losses">0</p>
-                      <p class="text-[8px] opacity-30 uppercase mt-2" data-i18n="losses">LOSSES</p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <div class="mt-8"><div id="p-links"></div><div id="p-edit-controls" class="hidden"></div></div>
-            </div>
-            <div>
-              <div class="bg-white/5 p-8 rounded-[2.5rem] border border-white/5">
-                <h3 class="text-[8px] font-black opacity-30 tracking-[0.4em] uppercase mb-6 text-white" data-i18n="friends">FRIENDS</h3>
-                <div id="p-friends-list" class="max-h-[400px] overflow-y-auto custom-scroll"></div>
-              </div>
-              <div class="promo-card mx-auto">
-                <div class="flex items-center gap-5 mb-4">
-                  <div class="w-16 h-16 shrink-0 bg-cover bg-center rounded-2xl yandex-border" style="background-image: url('EDApic.png');"></div>
-                  <div class="flex flex-col"><span class="text-[9px] font-black uppercase text-white tracking-widest mb-1" data-i18n="yandex_title">Yandex Food</span><h4 class="text-[11px] font-black uppercase italic text-white leading-none" data-i18n="yandex_sub">Become a courier</h4></div>
-                </div>
-                <p class="text-[7px] font-bold opacity-30 uppercase text-white" data-i18n="yandex_desc">Flexible schedule, daily payments and free uniform.</p>
-                <a href="https://reg.eda.yandex.ru/?advertisement_campaign=forms_for_agents&user_invite_code=208d82dc0c13481c9922ff27bd1773a2&utm_content=blank" target="_blank" class="eda-btn font-black block text-center mt-4 !py-3" data-i18n="yandex_apply">Apply now</a>
-              </div>
-              <div class="promo-card mx-auto mt-4">
-                <div class="flex items-center gap-5 mb-4">
-                  <div class="w-16 h-16 shrink-0 bg-cover bg-center rounded-2xl border-4 border-blue-600 shadow-lg shadow-blue-600/30" style="background-image: url('ICO_ARENA.PNG');"></div>
-                  <div class="flex flex-col"><span class="text-[9px] font-black uppercase text-white tracking-widest mb-1" data-i18n="android_title">ARENA.EXE mobile</span><h4 class="text-[11px] font-black uppercase italic text-blue-500 leading-none">ARENA.EXE</h4></div>
-                </div>
-                <p class="text-[7px] font-bold opacity-30 uppercase leading-relaxed text-white" data-i18n="android_desc">Tournaments always at hand. Only for Android devices.</p>
-                <a href="ARENA.EXE mobile.apk" download class="apk-btn font-black block text-center mt-4 !py-3" data-i18n="download_apk">DOWNLOAD EXE</a>
-              </div>
-              <div class="promo-card mx-auto mt-4">
-                <div class="flex items-center gap-5 mb-4">
-                  <div class="w-16 h-16 shrink-0 bg-cover bg-center rounded-2xl border-4 border-blue-600 shadow-lg shadow-blue-600/30" style="background-image: url('PicsArt_03-13-11.37.05.png');"></div>
-                  <div class="flex flex-col"><span class="text-[9px] font-black uppercase text-white tracking-widest mb-1">ClipboardGlass</span><h4 class="text-[11px] font-black uppercase italic text-blue-500 leading-none">ClipboardGlass.exe</h4></div>
-                </div>
-                <p class="text-[7px] font-bold opacity-30 uppercase leading-relaxed text-white">Convenient exchange buffer. Cross-platform clipboard manager.</p>
-                <a href="ClipboardGlass.exe" download class="bg-blue-600 font-black block text-center mt-4 !py-3 rounded-2xl text-[9px] uppercase tracking-widest text-white hover:bg-blue-700 transition-colors">DOWNLOAD EXE</a>
-              </div>
-            </div>
-          </div>
-          <button id="p-logout-btn" onclick="signOut(auth).then(() => { localStorage.clear(); location.reload(); })" class="mt-16 w-full py-6 rounded-[2rem] font-black text-[10px] uppercase tracking-[0.15em]">DISCONNECT</button>
-        </div>
-      </div>
-    </section>
+    <section id="section-profile" class="section hidden"><div class="bg-[#080808] rounded-[3.5rem] overflow-hidden"><div id="p-banner" class="h-64 md:h-80 bg-zinc-900 bg-cover bg-center relative"><div id="p-avatar-wrap" class="absolute -bottom-12 md:-bottom-16 left-8 md:left-12"></div></div><input type="file" id="ai-set" class="hidden" accept="image/*" onchange="core.uploadMedia(event, 'avatar')"><input type="file" id="bi-set" class="hidden" accept="image/*" onchange="core.uploadMedia(event, 'banner')"><div class="p-8 md:p-16 pt-20 md:pt-24"><div id="p-name-container"></div><div id="p-sub-container"></div><div class="grid grid-cols-1 md:grid-cols-3 gap-10 mt-16"><div class="md:col-span-2"><div class="grid grid-cols-2 gap-4"><div id="p-exr-container" class="col-span-2"></div><div class="bg-white/5 p-8 text-center rounded-[2rem] border border-white/5 col-span-2"><p id="p-hours" class="text-white font-black italic stats-fit">0H</p><p class="text-[8px] opacity-30 uppercase mt-4 text-white" data-i18n="hours">ONLINE</p></div><div class="col-span-2"><div class="grid grid-cols-2 gap-4"><div class="bg-white/5 p-8 rounded-[2rem] border border-white/5"><p class="text-blue-400 font-black text-3xl" id="p-wins">0</p><p class="text-[8px] opacity-30 uppercase mt-2" data-i18n="wins">WINS</p></div><div class="bg-white/5 p-8 rounded-[2rem] border border-white/5"><p class="text-red-400 font-black text-3xl" id="p-losses">0</p><p class="text-[8px] opacity-30 uppercase mt-2" data-i18n="losses">LOSSES</p></div></div></div></div><div class="mt-8"><div id="p-links"></div><div id="p-edit-controls" class="hidden"></div></div></div><div><div class="bg-white/5 p-8 rounded-[2.5rem] border border-white/5"><h3 class="text-[8px] font-black opacity-30 tracking-[0.4em] uppercase mb-6 text-white" data-i18n="friends">FRIENDS</h3><div id="p-friends-list" class="max-h-[400px] overflow-y-auto custom-scroll"></div></div><div class="promo-card mx-auto"><div class="flex items-center gap-5 mb-4"><div class="w-16 h-16 shrink-0 bg-cover bg-center rounded-2xl yandex-border" style="background-image: url('EDApic.png');"></div><div class="flex flex-col"><span class="text-[9px] font-black uppercase text-white tracking-widest mb-1" data-i18n="yandex_title">Yandex Food</span><h4 class="text-[11px] font-black uppercase italic text-white leading-none" data-i18n="yandex_sub">Become a courier</h4></div></div><p class="text-[7px] font-bold opacity-30 uppercase text-white" data-i18n="yandex_desc">Flexible schedule, daily payments and free uniform.</p><a href="https://reg.eda.yandex.ru/?advertisement_campaign=forms_for_agents&user_invite_code=208d82dc0c13481c9922ff27bd1773a2&utm_content=blank" target="_blank" class="eda-btn font-black block text-center mt-4 !py-3" data-i18n="yandex_apply">Apply now</a></div><div class="promo-card mx-auto mt-4"><div class="flex items-center gap-5 mb-4"><div class="w-16 h-16 shrink-0 bg-cover bg-center rounded-2xl border-4 border-blue-600 shadow-lg shadow-blue-600/30" style="background-image: url('ICO_ARENA.PNG');"></div><div class="flex flex-col"><span class="text-[9px] font-black uppercase text-white tracking-widest mb-1" data-i18n="android_title">ARENA.EXE mobile</span><h4 class="text-[11px] font-black uppercase italic text-blue-500 leading-none">ARENA.EXE</h4></div></div><p class="text-[7px] font-bold opacity-30 uppercase leading-relaxed text-white" data-i18n="android_desc">Tournaments always at hand. Only for Android devices.</p><a href="ARENA.EXE mobile.apk" download class="apk-btn font-black block text-center mt-4 !py-3" data-i18n="download_apk">DOWNLOAD EXE</a></div><div class="promo-card mx-auto mt-4"><div class="flex items-center gap-5 mb-4"><div class="w-16 h-16 shrink-0 bg-cover bg-center rounded-2xl border-4 border-blue-600 shadow-lg shadow-blue-600/30" style="background-image: url('PicsArt_03-13-11.37.05.png');"></div><div class="flex flex-col"><span class="text-[9px] font-black uppercase text-white tracking-widest mb-1">ClipboardGlass</span><h4 class="text-[11px] font-black uppercase italic text-blue-500 leading-none">ClipboardGlass.exe</h4></div></div><p class="text-[7px] font-bold opacity-30 uppercase leading-relaxed text-white">Convenient exchange buffer. Cross-platform clipboard manager.</p><a href="ClipboardGlass.exe" download class="bg-blue-600 font-black block text-center mt-4 !py-3 rounded-2xl text-[9px] uppercase tracking-widest text-white hover:bg-blue-700 transition-colors">DOWNLOAD EXE</a></div></div></div><button id="p-logout-btn" onclick="signOut(auth).then(() => { localStorage.clear(); location.reload(); })" class="mt-16 w-full py-6 rounded-[2rem] font-black text-[10px] uppercase tracking-[0.15em]">DISCONNECT</button></div></div></section>
 
-    <!-- MODERATOR PANEL SECTION -->
-    <section id="section-mod" class="section hidden">
-      <div class="bg-[#080808] rounded-[3.5rem] p-8">
-        <h1 class="text-3xl font-black italic uppercase mb-8 text-red-500">⚡ MODERATOR PANEL</h1>
-        <div class="flex gap-6 border-b border-white/10 mb-8 overflow-x-auto">
-          <button onclick="document.querySelectorAll('.mod-tab-content').forEach(c=>c.classList.add('hidden')); document.getElementById('mod-users').classList.remove('hidden'); this.classList.add('active');" class="mod-tab active text-[10px] font-black uppercase tracking-wider pb-4 border-b-2 border-blue-500 text-blue-500 whitespace-nowrap" data-i18n="users">USERS</button>
-          <button onclick="document.querySelectorAll('.mod-tab-content').forEach(c=>c.classList.add('hidden')); document.getElementById('mod-tournaments').classList.remove('hidden'); document.querySelectorAll('.mod-tab').forEach(t=>t.classList.remove('active')); this.classList.add('active');" class="mod-tab text-[10px] font-black uppercase tracking-wider pb-4 border-b-2 border-transparent text-white/40 whitespace-nowrap" data-i18n="tournaments">TOURNAMENTS</button>
-          <button onclick="document.querySelectorAll('.mod-tab-content').forEach(c=>c.classList.add('hidden')); document.getElementById('mod-reports').classList.remove('hidden'); document.querySelectorAll('.mod-tab').forEach(t=>t.classList.remove('active')); this.classList.add('active');" class="mod-tab text-[10px] font-black uppercase tracking-wider pb-4 border-b-2 border-transparent text-white/40 whitespace-nowrap" data-i18n="reports">REPORTS</button>
-          <button onclick="document.querySelectorAll('.mod-tab-content').forEach(c=>c.classList.add('hidden')); document.getElementById('mod-logs').classList.remove('hidden'); document.querySelectorAll('.mod-tab').forEach(t=>t.classList.remove('active')); this.classList.add('active');" class="mod-tab text-[10px] font-black uppercase tracking-wider pb-4 border-b-2 border-transparent text-white/40 whitespace-nowrap" data-i18n="logs">LOGS</button>
-          <button onclick="document.querySelectorAll('.mod-tab-content').forEach(c=>c.classList.add('hidden')); document.getElementById('mod-chat').classList.remove('hidden'); document.querySelectorAll('.mod-tab').forEach(t=>t.classList.remove('active')); this.classList.add('active');" class="mod-tab text-[10px] font-black uppercase tracking-wider pb-4 border-b-2 border-transparent text-white/40 whitespace-nowrap" data-i18n="mod_chat">MOD CHAT</button>
-        </div>
-        <div id="mod-users" class="mod-tab-content"><h2 class="text-[10px] font-black opacity-30 mb-6 uppercase" data-i18n="users">USERS</h2><div id="mod-users-list"></div></div>
-        <div id="mod-tournaments" class="mod-tab-content hidden"><h2 class="text-[10px] font-black opacity-30 mb-6 uppercase" data-i18n="tournaments">TOURNAMENTS</h2><div id="mod-tournaments-list"></div></div>
-        <div id="mod-reports" class="mod-tab-content hidden"><h2 class="text-[10px] font-black opacity-30 mb-6 uppercase" data-i18n="reports">REPORTS</h2><div id="mod-reports-list"></div></div>
-        <div id="mod-logs" class="mod-tab-content hidden"><h2 class="text-[10px] font-black opacity-30 mb-6 uppercase" data-i18n="logs">LOGS</h2><div id="mod-logs-list" class="max-h-[500px] overflow-y-auto"></div></div>
-        <div id="mod-chat" class="mod-tab-content hidden">
-          <h2 class="text-[10px] font-black opacity-30 mb-6 uppercase" data-i18n="mod_chat">MOD CHAT</h2>
-          <div id="mod-chat-box" class="h-[400px] overflow-y-auto bg-black/30 rounded-2xl p-6 mb-4 custom-scroll"></div>
-          <div class="flex gap-3"><input id="mod-chat-in" placeholder="MOD MESSAGE..." onkeydown="if(event.key==='Enter')core.sendModChat()" class="flex-1"><button onclick="core.sendModChat()" class="bg-blue-600 px-8 rounded-2xl font-black text-white">SEND</button></div>
-        </div>
-      </div>
-    </section>
+    <section id="section-mod" class="section hidden"><div class="bg-[#080808] rounded-[3.5rem] p-8"><h1 class="text-3xl font-black italic uppercase mb-8 text-red-500">⚡ MODERATOR PANEL</h1><div class="flex gap-6 border-b border-white/10 mb-8 overflow-x-auto"><button onclick="document.querySelectorAll('.mod-tab-content').forEach(c=>c.classList.add('hidden')); document.getElementById('mod-users').classList.remove('hidden'); this.classList.add('active');" class="mod-tab active text-[10px] font-black uppercase tracking-wider pb-4 border-b-2 border-blue-500 text-blue-500">USERS</button><button onclick="document.querySelectorAll('.mod-tab-content').forEach(c=>c.classList.add('hidden')); document.getElementById('mod-tournaments').classList.remove('hidden'); this.classList.add('active');" class="mod-tab text-[10px] font-black uppercase tracking-wider pb-4 border-b-2 border-transparent text-white/40">TOURNAMENTS</button><button onclick="document.querySelectorAll('.mod-tab-content').forEach(c=>c.classList.add('hidden')); document.getElementById('mod-reports').classList.remove('hidden'); this.classList.add('active');" class="mod-tab text-[10px] font-black uppercase tracking-wider pb-4 border-b-2 border-transparent text-white/40">REPORTS</button><button onclick="document.querySelectorAll('.mod-tab-content').forEach(c=>c.classList.add('hidden')); document.getElementById('mod-logs').classList.remove('hidden'); this.classList.add('active');" class="mod-tab text-[10px] font-black uppercase tracking-wider pb-4 border-b-2 border-transparent text-white/40">LOGS</button><button onclick="document.querySelectorAll('.mod-tab-content').forEach(c=>c.classList.add('hidden')); document.getElementById('mod-chat').classList.remove('hidden'); this.classList.add('active');" class="mod-tab text-[10px] font-black uppercase tracking-wider pb-4 border-b-2 border-transparent text-white/40">MOD CHAT</button></div><div id="mod-users" class="mod-tab-content"><h2 class="text-[10px] font-black opacity-30 mb-4 uppercase">USERS</h2><input type="text" id="mod-user-search" class="mod-search-input" placeholder="🔍 SEARCH BY NAME OR ID..." oninput="core.filterModUsers()"><div id="mod-users-list"></div></div><div id="mod-tournaments" class="mod-tab-content hidden"><h2 class="text-[10px] font-black opacity-30 mb-6 uppercase">TOURNAMENTS</h2><div id="mod-tournaments-list"></div></div><div id="mod-reports" class="mod-tab-content hidden"><h2 class="text-[10px] font-black opacity-30 mb-6 uppercase">REPORTS</h2><div id="mod-reports-list"></div></div><div id="mod-logs" class="mod-tab-content hidden"><h2 class="text-[10px] font-black opacity-30 mb-6 uppercase">LOGS</h2><div id="mod-logs-list" class="max-h-[500px] overflow-y-auto"></div></div><div id="mod-chat" class="mod-tab-content hidden"><h2 class="text-[10px] font-black opacity-30 mb-6 uppercase">MOD CHAT</h2><div id="mod-chat-box" class="h-[400px] overflow-y-auto bg-black/30 rounded-2xl p-6 mb-4 custom-scroll"></div><div class="flex gap-3"><input id="mod-chat-in" placeholder="MOD MESSAGE..." class="flex-1" onkeydown="if(event.key==='Enter')core.sendModChat()"><button onclick="core.sendModChat()" class="bg-blue-600 px-8 rounded-2xl font-black text-white">SEND</button></div></div></div></section>
 
-    <!-- LOBBY SECTION -->
-    <section id="section-lobby" class="section hidden">
-      <div class="bg-[#080808] p-10 rounded-[3.5rem] grid grid-cols-1 lg:grid-cols-3 gap-12">
-        <div class="lg:col-span-2">
-          <div class="flex justify-between items-center mb-8"><button onclick="core.show('home')" class="text-[10px] font-black opacity-30 uppercase italic text-white" data-i18n="back">< BACK</button><div class="flex items-center gap-4 bg-white/5 px-6 py-3 rounded-2xl border border-white/10 shadow-xl"><div id="l-code-text" class="text-2xl font-black text-blue-500 italic tracking-tighter">CODE</div><button onclick="core.copyId(document.getElementById('l-code-text').innerText)" class="bg-white/10 px-3 py-1 rounded-lg text-[8px] font-black uppercase text-white" data-i18n="copy">COPY</button></div></div>
-          <div id="l-cover" class="h-64 bg-zinc-900 bg-cover bg-center mb-10 rounded-[2.5rem] shadow-2xl"></div>
-          <div id="ln-container" class="flex items-center gap-4 flex-wrap mb-2"></div>
-          <div id="l-owner" class="text-[9px] font-black uppercase tracking-[0.3em] mb-8 text-white"></div>
-          <div class="flex items-center gap-6 mb-12"><p id="lp" class="text-blue-500 font-black text-[10px] uppercase tracking-widest"></p><div id="l-link-box"></div></div>
-          <div id="finish-btn-container" class="w-full"></div>
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-8 mb-10"><div id="t-alpha"></div><div id="t-omega"></div></div>
-          <div id="ldesc" class="bg-white/5 p-8 rounded-[1.5rem] text-[10px] opacity-40 uppercase text-white leading-relaxed"></div>
-        </div>
-        <div class="flex flex-col bg-black/40 rounded-[2.5rem] p-8 border border-white/5 h-[700px]">
-          <div id="lobby-controls" class="mb-8"></div>
-          <div id="chat-box" class="flex-1 overflow-y-auto mb-6 custom-scroll"></div>
-          <div class="flex gap-3"><input id="chat-in" data-i18n-ph="message" onkeydown="if(event.key==='Enter')core.sendMsg()"><button onclick="core.sendMsg()" class="bg-blue-600 px-6 rounded-2xl font-black text-white flex items-center justify-center"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg></button></div>
-        </div>
-      </div>
-    </section>
+    <section id="section-lobby" class="section hidden"><div class="bg-[#080808] p-10 rounded-[3.5rem] grid grid-cols-1 lg:grid-cols-3 gap-12"><div class="lg:col-span-2"><div class="flex justify-between items-center mb-8"><button onclick="core.show('home')" class="text-[10px] font-black opacity-30 uppercase italic text-white" data-i18n="back">< BACK</button><div class="flex items-center gap-4 bg-white/5 px-6 py-3 rounded-2xl border border-white/10 shadow-xl"><div id="l-code-text" class="text-2xl font-black text-blue-500 italic tracking-tighter">CODE</div><button onclick="core.copyId(document.getElementById('l-code-text').innerText)" class="bg-white/10 px-3 py-1 rounded-lg text-[8px] font-black uppercase text-white" data-i18n="copy">COPY</button></div></div><div id="l-cover" class="h-64 bg-zinc-900 bg-cover bg-center mb-10 rounded-[2.5rem] shadow-2xl"></div><div id="ln-container" class="flex items-center gap-4 flex-wrap mb-2"></div><div id="l-owner" class="text-[9px] font-black uppercase tracking-[0.3em] mb-8 text-white"></div><div class="flex items-center gap-6 mb-12"><p id="lp" class="text-blue-500 font-black text-[10px] uppercase tracking-widest"></p><div id="l-link-box"></div></div><div id="finish-btn-container" class="w-full"></div><div class="grid grid-cols-1 md:grid-cols-2 gap-8 mb-10"><div id="t-alpha"></div><div id="t-omega"></div></div><div id="ldesc" class="bg-white/5 p-8 rounded-[1.5rem] text-[10px] opacity-40 uppercase text-white leading-relaxed"></div></div><div class="flex flex-col bg-black/40 rounded-[2.5rem] p-8 border border-white/5 h-[700px]"><div id="lobby-controls" class="mb-8"></div><div id="chat-box" class="flex-1 overflow-y-auto mb-6 custom-scroll"></div><div class="flex gap-3"><input id="chat-in" data-i18n-ph="message" class="flex-1" onkeydown="if(event.key==='Enter')core.sendMsg()"><button onclick="core.sendMsg()" class="bg-blue-600 px-6 rounded-2xl font-black text-white"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg></button></div></div></div></section>
   </main>
 
-  <!-- MODALS -->
   <div id="confirm-modal" class="fixed inset-0 z-[1000000] bg-black/95 flex items-center justify-center p-6 hidden"><div class="bg-zinc-900 p-10 rounded-[3rem] border border-white/10 max-w-xs w-full text-center"><p id="confirm-text" class="text-[10px] font-black uppercase mb-8 text-white"></p><div class="grid grid-cols-3 gap-4"><button id="confirm-yes" class="bg-blue-600 text-white py-4 rounded-2xl font-black text-[10px] uppercase col-span-1"></button><button id="confirm-no" class="bg-red-600 py-4 rounded-2xl font-black text-[10px] uppercase text-white col-span-1"></button><button id="confirm-cancel" class="bg-white/5 py-4 rounded-2xl font-black text-[10px] uppercase text-white col-span-1 hidden"></button></div></div></div>
   <div id="security-modal" class="fixed inset-0 z-[1000000] bg-black/95 flex items-center justify-center p-6 hidden"><div class="bg-zinc-900 p-10 rounded-[3rem] border border-white/10 max-w-md w-full text-center"><h3 class="text-blue-500 font-black uppercase text-[10px] tracking-widest mb-4" data-i18n="security_check">SECURITY CHECK</h3><p class="text-[8px] font-black opacity-30 uppercase mb-8 text-white" data-i18n="link_preview">VERIFY THE DESTINATION LINK</p><div class="bg-black/40 p-6 rounded-2xl border border-white/5 mb-10 overflow-hidden"><p id="sec-url-display" class="text-xs font-bold text-white/70 break-all"></p></div><div class="grid grid-cols-2 gap-4"><button id="sec-connect" class="bg-blue-600 text-white py-4 rounded-2xl font-black text-[10px] uppercase" data-i18n="connect">CONNECT</button><button onclick="document.getElementById('security-modal').classList.add('hidden')" class="bg-white/5 py-4 rounded-2xl font-black text-[10px] uppercase text-white" data-i18n="close">CLOSE</button></div></div></div>
   <div id="auth-screen" class="fixed inset-0 z-[200000] bg-black flex items-center justify-center p-6 hidden"><div class="w-full max-w-xs text-center"><h1 class="text-4xl font-black italic mb-12 tracking-tighter uppercase text-white">ARENA.<span class="exe-blue">EXE</span></h1><input id="an" placeholder="NICKNAME" class="mb-4"><input id="ap" type="password" placeholder="PASSWORD" class="mb-8"><div class="grid grid-cols-2 gap-4"><button onclick="core.login()" class="bg-blue-600 py-5 rounded-2xl font-black text-[10px] uppercase text-white" data-i18n="login">LOG IN</button><button onclick="core.register()" class="bg-white/5 py-5 rounded-2xl font-black text-[10px] uppercase text-white" data-i18n="join">JOIN</button></div></div></div>
@@ -906,6 +725,12 @@
   <div id="mini-modal" class="fixed inset-0 z-[300000] bg-black/80 backdrop-blur-md flex items-center justify-center p-6 hidden" onclick="this.classList.add('hidden')"><div id="mini-content" onclick="event.stopPropagation()"></div></div>
   <div id="name-modal" class="fixed inset-0 z-[500000] bg-black/95 flex items-center justify-center p-6 hidden"><div class="w-full max-w-xs bg-zinc-900 p-8 rounded-[3rem] border border-white/10"><h2 class="text-[10px] font-black uppercase mb-6 text-white text-center" data-i18n="change_name">CHANGE NAME</h2><input id="edit-name-in" data-i18n-ph="name" class="mb-6"><div class="grid grid-cols-2 gap-4"><button onclick="core.saveName()" class="bg-blue-600 py-4 rounded-2xl font-black text-[10px] uppercase text-white" data-i18n="save">SAVE</button><button onclick="document.getElementById('name-modal').classList.add('hidden')" class="bg-white/5 py-4 rounded-2xl font-black text-[10px] uppercase text-white" data-i18n="cancel">CANCEL</button></div></div></div>
   <div id="link-modal" class="fixed inset-0 z-[500000] bg-black/95 flex items-center justify-center p-6 hidden"><div class="w-full max-w-xs bg-zinc-900 p-8 rounded-[3rem] border border-white/10"><h2 class="text-[10px] font-black uppercase mb-6 text-white text-center" data-i18n="social_link">SOCIAL LINK</h2><input id="link-label-in" data-i18n-ph="label" class="mb-4"><input id="link-url-in" placeholder="URL" class="mb-6"><div class="grid grid-cols-2 gap-4"><button onclick="core.saveLink()" class="bg-blue-600 py-4 rounded-2xl font-black text-[10px] uppercase text-white" data-i18n="save">SAVE</button><button onclick="document.getElementById('link-modal').classList.add('hidden')" class="bg-white/5 py-4 rounded-2xl font-black text-[10px] uppercase text-white" data-i18n="cancel">CANCEL</button></div></div></div>
-  <div id="dm-modal" class="fixed inset-0 z-[400000] bg-black/95 flex items-center justify-center p-6 hidden"><div class="w-full max-lg bg-zinc-900 rounded-[3rem] border border-white/10 h-[600px] flex flex-col overflow-hidden"><div class="p-8 border-b border-white/5 flex justify-between items-center"><div><div class="text-[8px] opacity-20 font-black uppercase mb-1">DM</div><div id="dm-target-name" class="text-xl font-black italic uppercase text-blue-500">...</div></div><button onclick="document.getElementById('dm-modal').classList.add('hidden'); currentDmId = null;" class="text-xl opacity-30 text-white">×</button></div><div id="dm-box" class="flex-1 overflow-y-auto p-8 custom-scroll"></div><input type="file" id="dm-file-input" class="hidden" onchange="core.sendDmFile(event)"><div class="p-8 bg-black/40 flex gap-3"><button onclick="document.getElementById('dm-file-input').click()" class="bg-white/5 px-4 rounded-2xl text-white/20 hover:text-blue-500 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.51a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button><button id="voice-btn" class="bg-white/5 px-4 rounded-2xl text-white/20 hover:text-red-500 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg></button><input id="dm-in" placeholder="..." onkeydown="if(event.key==='Enter')core.sendDm()"><button onclick="core.sendDm()" class="bg-blue-600 px-8 rounded-2xl font-black text-white flex items-center justify-center"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg></button></div></div></div>
+  <div id="dm-modal" class="fixed inset-0 z-[400000] bg-black/95 flex items-center justify-center p-6 hidden"><div class="w-full max-lg bg-zinc-900 rounded-[3rem] border border-white/10 h-[600px] flex flex-col overflow-hidden"><div class="p-8 border-b border-white/5 flex justify-between items-center"><div><div class="text-[8px] opacity-20 font-black uppercase mb-1">DM</div><div id="dm-target-name" class="text-xl font-black italic uppercase text-blue-500">...</div></div><button onclick="document.getElementById('dm-modal').classList.add('hidden'); currentDmId = null;" class="text-xl opacity-30 text-white">×</button></div><div id="dm-box" class="flex-1 overflow-y-auto p-8 custom-scroll"></div><input type="file" id="dm-file-input" class="hidden" onchange="core.sendDmFile(event)"><div class="p-8 bg-black/40 flex gap-3"><button onclick="document.getElementById('dm-file-input').click()" class="bg-white/5 px-4 rounded-2xl text-white/20 hover:text-blue-500 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.51a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button><button id="voice-btn" class="bg-white/5 px-4 rounded-2xl text-white/20 hover:text-red-500 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg></button><input id="dm-in" placeholder="..." class="flex-1" onkeydown="if(event.key==='Enter')core.sendDm()"><button onclick="core.sendDm()" class="bg-blue-600 px-8 rounded-2xl font-black text-white"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg></button></div></div></div>
+  
+  <!-- Report Modal -->
+  <div id="report-modal" class="fixed inset-0 z-[500000] bg-black/95 flex items-center justify-center p-6 hidden"><div class="w-full max-w-md bg-zinc-900 p-8 rounded-[3rem] border border-white/10"><h2 class="text-xl font-black italic uppercase mb-6 text-red-500 text-center" data-i18n="report_title">REPORT PLAYER</h2><textarea id="report-reason" class="w-full h-32 !text-[12px] !normal-case !uppercase" placeholder="Describe the reason..."></textarea><div class="flex gap-4 mt-6"><button onclick="core.submitReport()" class="flex-1 bg-red-600 py-4 rounded-2xl font-black text-[10px] uppercase text-white" data-i18n="submit_report">SEND REPORT</button><button onclick="document.getElementById('report-modal').classList.add('hidden'); pendingReportTarget=null;" class="px-8 bg-white/5 rounded-2xl font-black text-[10px] text-white uppercase" data-i18n="cancel">CANCEL</button></div></div></div>
+  
+  <!-- Edit Modal -->
+  <div id="edit-modal" class="fixed inset-0 z-[500000] bg-black/95 flex items-center justify-center p-6 hidden"><div class="w-full max-w-md bg-zinc-900 p-8 rounded-[3rem] border border-white/10"><h2 class="text-xl font-black italic uppercase mb-6 text-blue-500 text-center" data-i18n="edit_title">EDIT MESSAGE</h2><textarea id="edit-text-input" class="w-full h-32 !text-[12px] !normal-case !uppercase" placeholder="Edit your message..."></textarea><div class="flex gap-4 mt-6"><button onclick="core.saveEditedMessage()" class="flex-1 bg-blue-600 py-4 rounded-2xl font-black text-[10px] uppercase text-white" data-i18n="save">SAVE</button><button onclick="document.getElementById('edit-modal').classList.add('hidden'); pendingEditMsgId=null;" class="px-8 bg-white/5 rounded-2xl font-black text-[10px] text-white uppercase" data-i18n="cancel">CANCEL</button></div></div></div>
 </body>
-          </html>
+    </html>
