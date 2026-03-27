@@ -82,7 +82,7 @@
         report_reason: "REPORT REASON", submit_report: "SUBMIT REPORT", no_reports: "NO REPORTS", 
         mod_actions: "MOD ACTIONS", force_finish: "FORCE FINISH", close_reg: "CLOSE REG", copy_id: "COPY ID",
         report_title: "REPORT PLAYER", report_placeholder: "Describe the reason...", edit_title: "EDIT MESSAGE",
-        attach_screenshot: "ATTACH SCREENSHOT"
+        attach_screenshot: "ATTACH FILES (multiple)", files_attached: "FILES ATTACHED:", send_files: "SEND FILES"
       },
       ru: {
         discover: "ОБЗОР", create: "СОЗДАТЬ", profile: "ПРОФИЛЬ", mod: "МОД", exr: "EXR", hours: "ОНЛАЙН", 
@@ -117,7 +117,7 @@
         report_reason: "ПРИЧИНА ЖАЛОБЫ", submit_report: "ОТПРАВИТЬ ЖАЛОБУ", no_reports: "НЕТ ЖАЛОБ", 
         mod_actions: "ДЕЙСТВИЯ МОДЕРАТОРА", force_finish: "ПРИНУДИТЕЛЬНО ЗАВЕРШИТЬ", close_reg: "ЗАКРЫТЬ РЕГ.", copy_id: "КОПИ ID",
         report_title: "ПОЖАЛОВАТЬСЯ", report_placeholder: "Опишите причину...", edit_title: "РЕДАКТИРОВАТЬ",
-        attach_screenshot: "ПРИКРЕПИТЬ СКРИНШОТ"
+        attach_screenshot: "ПРИКРЕПИТЬ ФАЙЛЫ (несколько)", files_attached: "ФАЙЛОВ ПРИКРЕПЛЕНО:", send_files: "ОТПРАВИТЬ ФАЙЛЫ"
       }
     };
 
@@ -162,6 +162,9 @@
       currentModAudioId: null, modAudioWaveInterval: null,
       mediaRecorder: null, audioChunks: [],
       modMediaRecorder: null, modAudioChunks: [],
+      
+      // Store pending files for reports
+      pendingReportFiles: [],
 
       getExrLevel(exr) { for (const l of EXR_LEVELS) if (exr >= l.min && exr <= l.max) return l; return EXR_LEVELS[0]; },
       getExrProgress(exr) { const l = this.getExrLevel(exr); if (l.level === 10) return 100; return Math.min(100, Math.max(0, Math.floor(((exr - l.min) / (l.max - l.min)) * 100))); },
@@ -254,6 +257,50 @@
       stopModRecording() { if (this.modMediaRecorder && this.modMediaRecorder.state !== "inactive") { this.modMediaRecorder.stop(); document.getElementById('mod-voice-btn').classList.remove('bg-red-600', 'animate-pulse'); } },
       async sendModVoice() { if (this.modAudioChunks.length === 0) return; const blob = new Blob(this.modAudioChunks, { type: 'audio/webm' }); const reader = new FileReader(); reader.onload = async (e) => { await push(ref(db, 'mod_chat'), { uid: this.u.uid, name: this.userData.name, msg: e.target.result, type: 'audio', timestamp: Date.now() }); }; reader.readAsDataURL(blob); },
 
+      // Multiple files for DM
+      async sendDmMultipleFiles(e) {
+        const files = Array.from(e.target.files);
+        if (!files.length || !currentDmId) return;
+        for (const file of files) {
+          const reader = new FileReader();
+          await new Promise((resolve) => {
+            reader.onload = async (ev) => {
+              let type = 'file';
+              if (file.type.startsWith('image/')) type = 'image';
+              else if (file.type.startsWith('video/')) type = 'video';
+              else if (file.type.startsWith('audio/')) type = 'audio';
+              await push(ref(db, `direct_messages/${currentDmId}`), { uid: this.u.uid, msg: ev.target.result, type: type, fileName: file.name, ts: Date.now() });
+              resolve();
+            };
+            reader.readAsDataURL(file);
+          });
+        }
+        this.notify(`${files.length} ${window.t('files_attached')}`);
+        e.target.value = '';
+      },
+
+      // Multiple files for MOD chat
+      async sendModMultipleFiles(e) {
+        const files = Array.from(e.target.files);
+        if (!files.length) return;
+        for (const file of files) {
+          const reader = new FileReader();
+          await new Promise((resolve) => {
+            reader.onload = async (ev) => {
+              let type = 'file';
+              if (file.type.startsWith('image/')) type = 'image';
+              else if (file.type.startsWith('video/')) type = 'video';
+              else if (file.type.startsWith('audio/')) type = 'audio';
+              await push(ref(db, 'mod_chat'), { uid: this.u.uid, name: this.userData.name, msg: ev.target.result, type: type, fileName: file.name, timestamp: Date.now() });
+              resolve();
+            };
+            reader.readAsDataURL(file);
+          });
+        }
+        this.notify(`${files.length} ${window.t('files_attached')}`);
+        e.target.value = '';
+      },
+
       stopAllAudio() { if (this.currentAudioId) { const prevAudio = document.getElementById(this.currentAudioId); if (prevAudio) { prevAudio.pause(); prevAudio.currentTime = 0; } if (this.audioWaveInterval) clearInterval(this.audioWaveInterval); this.currentAudioId = null; } if (this.currentModAudioId) { const prevAudio = document.getElementById(this.currentModAudioId); if (prevAudio) { prevAudio.pause(); prevAudio.currentTime = 0; } if (this.modAudioWaveInterval) clearInterval(this.modAudioWaveInterval); this.currentModAudioId = null; } document.querySelectorAll('.voice-play-btn svg').forEach(svg => { if (svg) svg.innerHTML = '<polygon points="5 3 19 12 5 21 5 3" fill="white"/>'; }); },
       toggleAudio(audioId, src, isMod = false) { const audio = document.getElementById(audioId); const playBtn = document.getElementById(`playBtn_${audioId}`); if (!audio) return; if ((isMod && this.currentModAudioId === audioId && !audio.paused) || (!isMod && this.currentAudioId === audioId && !audio.paused)) { audio.pause(); this.stopAllAudio(); return; } this.stopAllAudio(); if (!audio.src || audio.src !== src) { audio.src = src; audio.load(); } audio.play(); if (isMod) this.currentModAudioId = audioId; else this.currentAudioId = audioId; const svg = playBtn?.querySelector('svg'); if (svg) svg.innerHTML = '<rect x="6" y="4" width="4" height="16" fill="white"/><rect x="14" y="4" width="4" height="16" fill="white"/>'; this.animateWaveform(audioId, isMod); this.updateAudioProgress(audioId, isMod); audio.onended = () => { this.stopAllAudio(); const endSvg = document.getElementById(`playBtn_${audioId}`)?.querySelector('svg'); if (endSvg) endSvg.innerHTML = '<polygon points="5 3 19 12 5 21 5 3" fill="white"/>'; }; },
       animateWaveform(audioId, isMod) { const waveform = document.getElementById(`waveform_${audioId}`); if (!waveform) return; const bars = waveform.querySelectorAll('.wave-bar'); const interval = setInterval(() => { if ((isMod && this.currentModAudioId !== audioId) || (!isMod && this.currentAudioId !== audioId)) { clearInterval(interval); return; } bars.forEach(bar => { bar.style.height = `${Math.random() * 24 + 6}px`; }); }, 80); if (isMod) this.modAudioWaveInterval = interval; else this.audioWaveInterval = interval; },
@@ -269,29 +316,66 @@
       async saveEditedModMessage() { const newText = document.getElementById('edit-mod-text-input').value.trim(); if (newText) { await update(ref(db, `mod_chat/${pendingEditModMsgId}`), { msg: newText, edited: true }); this.notify(window.t('name_updated')); } document.getElementById('edit-mod-modal').classList.add('hidden'); pendingEditModMsgId = null; },
       async deleteModMessage(msgId) { if(await this.ask(window.t('del_msg'))) { await remove(ref(db, `mod_chat/${msgId}`)); this.notify(window.t('link_removed')); } },
       
-      async sendModFile(e) { const file = e.target.files[0]; if (!file) return; const reader = new FileReader(); reader.onload = async (ev) => { let type = 'file'; if (file.type.startsWith('image/')) type = 'image'; else if (file.type.startsWith('video/')) type = 'video'; else if (file.type.startsWith('audio/')) type = 'audio'; await push(ref(db, 'mod_chat'), { uid: this.u.uid, name: this.userData.name, msg: ev.target.result, type: type, fileName: file.name, timestamp: Date.now() }); }; reader.readAsDataURL(file); },
-      
       downloadFile(base64, name) { const a = document.createElement('a'); a.href = base64; a.download = name || "file"; a.click(); },
 
+      // Report with multiple files
       openReportModal(targetUid, targetName) {
         pendingReportTarget = { uid: targetUid, name: targetName };
+        this.pendingReportFiles = [];
         document.getElementById('report-reason').value = '';
-        document.getElementById('report-screenshot-preview').style.backgroundImage = 'none';
-        document.getElementById('report-screenshot-preview').classList.add('hidden');
-        document.getElementById('report-screenshot-data').value = '';
+        document.getElementById('report-files-list').innerHTML = '';
+        document.getElementById('report-files-list').classList.add('hidden');
         document.getElementById('report-modal').classList.remove('hidden');
       },
-      async attachReportScreenshot(e) {
-        const file = e.target.files[0];
-        if (!file) return;
-        const reader = new FileReader();
-        reader.onload = (ev) => {
-          document.getElementById('report-screenshot-data').value = ev.target.result;
-          const preview = document.getElementById('report-screenshot-preview');
-          preview.style.backgroundImage = `url(${ev.target.result})`;
-          preview.classList.remove('hidden');
-        };
-        reader.readAsDataURL(file);
+      async attachReportFiles(e) {
+        const files = Array.from(e.target.files);
+        for (const file of files) {
+          const reader = new FileReader();
+          await new Promise((resolve) => {
+            reader.onload = (ev) => {
+              this.pendingReportFiles.push({
+                name: file.name,
+                type: file.type,
+                data: ev.target.result
+              });
+              resolve();
+            };
+            reader.readAsDataURL(file);
+          });
+        }
+        const listEl = document.getElementById('report-files-list');
+        listEl.innerHTML = '';
+        if (this.pendingReportFiles.length > 0) {
+          listEl.classList.remove('hidden');
+          this.pendingReportFiles.forEach((f, idx) => {
+            const fileDiv = document.createElement('div');
+            fileDiv.className = 'flex items-center justify-between bg-white/5 p-2 rounded-lg mb-2 text-[8px]';
+            fileDiv.innerHTML = `
+              <span class="truncate">📎 ${f.name}</span>
+              <button onclick="core.removeReportFile(${idx})" class="text-red-500 px-2">×</button>
+            `;
+            listEl.appendChild(fileDiv);
+          });
+        }
+        e.target.value = '';
+      },
+      removeReportFile(idx) {
+        this.pendingReportFiles.splice(idx, 1);
+        const listEl = document.getElementById('report-files-list');
+        if (this.pendingReportFiles.length === 0) {
+          listEl.classList.add('hidden');
+        } else {
+          listEl.innerHTML = '';
+          this.pendingReportFiles.forEach((f, i) => {
+            const fileDiv = document.createElement('div');
+            fileDiv.className = 'flex items-center justify-between bg-white/5 p-2 rounded-lg mb-2 text-[8px]';
+            fileDiv.innerHTML = `
+              <span class="truncate">📎 ${f.name}</span>
+              <button onclick="core.removeReportFile(${i})" class="text-red-500 px-2">×</button>
+            `;
+            listEl.appendChild(fileDiv);
+          });
+        }
       },
       async submitReport() {
         const reason = document.getElementById('report-reason').value.trim();
@@ -300,12 +384,13 @@
           await push(ref(db, 'reports'), {
             reporterUid: this.u.uid, reporterName: this.userData.name,
             reportedUid: pendingReportTarget.uid, reportedName: pendingReportTarget.name,
-            reason: reason, screenshot: document.getElementById('report-screenshot-data').value || null,
+            reason: reason, files: this.pendingReportFiles,
             timestamp: Date.now()
           });
           this.notify('REPORT SENT TO MODERATORS');
           document.getElementById('report-modal').classList.add('hidden');
           pendingReportTarget = null;
+          this.pendingReportFiles = [];
         }
       },
 
@@ -351,14 +436,13 @@
             } else {
               content = v.msg;
             }
-            const actionButtons = isMe ? `<div class="flex gap-2 mt-1 justify-end"><button onclick="core.openEditModal('${mid}', '${v.msg.replace(/'/g, "\\'")}')" class="opacity-50 hover:opacity-100 transition p-1.5 rounded-lg hover:bg-white/10">${editIcon}</button><button onclick="core.deleteMessage('${mid}')" class="opacity-50 hover:opacity-100 transition p-1.5 rounded-lg hover:bg-white/10">${deleteIcon}</button></div>` : '';
+            const actionButtons = isMe ? `<div class="flex gap-2 mt-1 justify-end"><button onclick="core.openEditModal('${mid}', '${(v.msg || '').replace(/'/g, "\\'")}')" class="opacity-50 hover:opacity-100 transition p-1.5 rounded-lg hover:bg-white/10">${editIcon}</button><button onclick="core.deleteMessage('${mid}')" class="opacity-50 hover:opacity-100 transition p-1.5 rounded-lg hover:bg-white/10">${deleteIcon}</button></div>` : '';
             b.innerHTML += `<div class="flex flex-col ${isMe ? 'items-end' : 'items-start'} mb-4 animate-slide"><div class="px-4 py-3 rounded-2xl text-[10px] font-bold ${isMe ? 'bg-blue-600 text-white rounded-tr-none' : 'bg-white/5 text-white/70 rounded-tl-none'}">${content}</div>${actionButtons}</div>`;
           });
           b.scrollTop = b.scrollHeight;
         });
       },
       async sendDm() { const i = document.getElementById('dm-in'); if(!i.value.trim() || !currentDmId) return; await push(ref(db, `direct_messages/${currentDmId}`), { uid: this.u.uid, msg: i.value.trim(), type: 'text', ts: Date.now() }); i.value = ''; },
-      async sendDmFile(e) { const file = e.target.files[0]; if (!file || !currentDmId) return; const reader = new FileReader(); reader.onload = async (ev) => { let type = 'file'; if (file.type.startsWith('image/')) type = 'image'; else if (file.type.startsWith('video/')) type = 'video'; else if (file.type.startsWith('audio/')) type = 'audio'; await push(ref(db, `direct_messages/${currentDmId}`), { uid: this.u.uid, msg: ev.target.result, type: type, fileName: file.name, ts: Date.now() }); }; reader.readAsDataURL(file); },
 
       // MOD PANEL
       modActiveTab: 'users',
@@ -384,7 +468,7 @@
       async modRemovePro(uid, name) { if(await this.ask(`REMOVE PRO FROM ${name}?`)) { await update(ref(db, `users/${uid}`), { isPro: false, proGrantedAt: null }); addModLog('REMOVE_PRO', uid, name); this.notify(`${name} PRO REMOVED`); this.renderModUsers(); } },
       async renderModTournaments() { const container = document.getElementById('mod-tournaments-list'); if (!container) return; const tSnap = await get(ref(db, 'tourneys')); const tours = tSnap.val() || {}; container.innerHTML = ''; if (Object.keys(tours).length === 0) { container.innerHTML = `<div class="text-center py-10 text-[8px] opacity-30 uppercase">NO TOURNAMENTS</div>`; return; } for (const [tid, data] of Object.entries(tours)) { const alphaCount = data.alpha ? Object.keys(data.alpha).length : 0; const omegaCount = data.omega ? Object.keys(data.omega).length : 0; container.innerHTML += `<div class="bg-white/5 p-5 rounded-2xl border border-white/10 mb-3"><div class="flex justify-between items-start flex-wrap gap-3"><div><div class="text-lg font-black italic uppercase text-white">${data.name || 'NO NAME'}</div><div class="text-[8px] opacity-30 mt-1">${data.code || 'NO CODE'} | ${data.format || 'N/A'} | ${alphaCount}+${omegaCount} players</div></div><div class="flex gap-2"><button onclick="core.openLobby('${tid}')" class="px-4 py-2 rounded-xl bg-blue-600/20 text-blue-400 text-[9px] font-black uppercase">VIEW</button><button onclick="core.modForceFinish('${tid}', '${data.name || 'TOURNAMENT'}')" class="px-4 py-2 rounded-xl bg-red-600/20 text-red-500 text-[9px] font-black uppercase">${window.t('force_finish')}</button><button onclick="core.deleteTourney('${tid}')" class="px-4 py-2 rounded-xl bg-white/10 text-white/40 text-[9px] font-black uppercase">${window.t('delete_event')}</button></div></div></div>`; } },
       async modForceFinish(tid, name) { if(await this.ask(`FORCE FINISH ${name}?`)) { const tSnap = await get(ref(db, `tourneys/${tid}`)); const t = tSnap.val(); if (t && t.alpha && t.omega) { for (const uid of Object.keys(t.alpha)) { await update(ref(db, `users/${uid}`), { exr: increment(25), wins: increment(1) }); } for (const uid of Object.keys(t.omega)) { await update(ref(db, `users/${uid}`), { exr: increment(-15), losses: increment(1) }); } } await remove(ref(db, `tourneys/${tid}`)); await remove(ref(db, `chats/${tid}`)); addModLog('FORCE_FINISH_TOURNAMENT', null, null, name); this.notify(`TOURNAMENT ${name} FORCE FINISHED`); this.renderModTournaments(); this.loadList(); } },
-      async renderModReports() { const container = document.getElementById('mod-reports-list'); if (!container) return; const rSnap = await get(ref(db, 'reports')); const reports = rSnap.val() || {}; container.innerHTML = ''; if (Object.keys(reports).length === 0) { container.innerHTML = `<div class="text-center py-10 text-[8px] opacity-30 uppercase">${window.t('no_reports')}</div>`; return; } for (const [rid, data] of Object.entries(reports)) { const screenshotHtml = data.screenshot ? `<div class="mt-2"><img src="${data.screenshot}" class="max-w-[200px] max-h-[150px] rounded-xl border border-white/10"></div>` : ''; container.innerHTML += `<div class="bg-white/5 p-5 rounded-2xl border border-white/10 mb-3"><div class="flex justify-between items-start flex-wrap gap-3"><div class="flex-1"><div class="text-[10px] font-black uppercase text-red-400">${data.reporterName || 'UNKNOWN'} → ${data.reportedName || 'UNKNOWN'}</div><div class="text-[9px] opacity-60 mt-2">${data.reason || 'NO REASON'}</div>${screenshotHtml}<div class="text-[7px] opacity-20 mt-1">${data.timestamp ? new Date(data.timestamp).toLocaleString() : 'NO DATE'}</div></div><div class="flex gap-2"><button onclick="core.modResolveReport('${rid}', '${data.reportedUid || ''}', '${data.reportedName || ''}')" class="px-4 py-2 rounded-xl bg-green-600/20 text-green-500 text-[9px] font-black uppercase">BAN & RESOLVE</button><button onclick="core.modDismissReport('${rid}')" class="px-4 py-2 rounded-xl bg-white/10 text-white/40 text-[9px] font-black uppercase">DISMISS</button></div></div></div>`; } },
+      async renderModReports() { const container = document.getElementById('mod-reports-list'); if (!container) return; const rSnap = await get(ref(db, 'reports')); const reports = rSnap.val() || {}; container.innerHTML = ''; if (Object.keys(reports).length === 0) { container.innerHTML = `<div class="text-center py-10 text-[8px] opacity-30 uppercase">${window.t('no_reports')}</div>`; return; } for (const [rid, data] of Object.entries(reports)) { let filesHtml = ''; if (data.files && data.files.length > 0) { filesHtml = `<div class="mt-3 pt-3 border-t border-white/10"><div class="text-[7px] font-black opacity-40 mb-2">ATTACHED FILES (${data.files.length}):</div><div class="flex flex-wrap gap-2">`; data.files.forEach((f, idx) => { const isImage = f.type?.startsWith('image/'); filesHtml += `<div class="bg-black/30 p-2 rounded-lg"><div class="text-[6px] opacity-60 mb-1">${f.name}</div>${isImage ? `<img src="${f.data}" class="max-w-[100px] max-h-[80px] rounded-lg border border-white/10">` : `<button onclick="core.downloadFile('${f.data}', '${f.name}')" class="text-blue-500 text-[8px] font-black uppercase">DOWNLOAD</button>`}</div>`; }); filesHtml += `</div></div>`; } container.innerHTML += `<div class="bg-white/5 p-5 rounded-2xl border border-white/10 mb-3"><div class="flex justify-between items-start flex-wrap gap-3"><div class="flex-1"><div class="text-[10px] font-black uppercase text-red-400">${data.reporterName || 'UNKNOWN'} → ${data.reportedName || 'UNKNOWN'}</div><div class="text-[9px] opacity-60 mt-2">${data.reason || 'NO REASON'}</div>${filesHtml}<div class="text-[7px] opacity-20 mt-1">${data.timestamp ? new Date(data.timestamp).toLocaleString() : 'NO DATE'}</div></div><div class="flex gap-2"><button onclick="core.modResolveReport('${rid}', '${data.reportedUid || ''}', '${data.reportedName || ''}')" class="px-4 py-2 rounded-xl bg-green-600/20 text-green-500 text-[9px] font-black uppercase">BAN & RESOLVE</button><button onclick="core.modDismissReport('${rid}')" class="px-4 py-2 rounded-xl bg-white/10 text-white/40 text-[9px] font-black uppercase">DISMISS</button></div></div></div>`; } },
       async modResolveReport(rid, reportedUid, reportedName) { if (reportedUid) { await update(ref(db, `users/${reportedUid}`), { isBan: true }); } await remove(ref(db, `reports/${rid}`)); addModLog('BAN_FROM_REPORT', reportedUid, reportedName); this.notify(`${reportedName || 'User'} BANNED FROM REPORT`); this.renderModReports(); this.renderModUsers(); },
       async modDismissReport(rid) { await remove(ref(db, `reports/${rid}`)); this.notify('REPORT DISMISSED'); this.renderModReports(); },
       renderModLogs() { const container = document.getElementById('mod-logs-list'); if (!container) return; const logsRef = query(ref(db, 'mod_logs'), limitToLast(100)); onValue(logsRef, (snap) => { const logs = snap.val() || {}; container.innerHTML = ''; if (Object.keys(logs).length === 0) { container.innerHTML = `<div class="text-center py-10 text-[8px] opacity-30 uppercase">NO LOGS</div>`; return; } Object.entries(logs).reverse().forEach(([lid, data]) => { container.innerHTML += `<div class="bg-white/5 p-4 rounded-xl border border-white/5 mb-2"><div class="flex justify-between items-start text-[9px] flex-wrap gap-2"><span class="text-blue-400 font-black">${data.adminName || 'SYSTEM'}</span><span class="text-white/60">${data.action || 'UNKNOWN'}</span><span class="text-white/30 text-[8px]">${data.targetName || data.details || '-'}</span><span class="text-white/20 text-[7px]">${data.timestamp ? new Date(data.timestamp).toLocaleString() : 'NO DATE'}</span></div></div>`; }); }); },
@@ -480,6 +564,8 @@
     .voice-progress-fill { position: absolute; left: 0; top: 0; height: 100%; background: #3b82f6; border-radius: 2px; width: 0%; transition: width 0.1s linear; }
     .voice-time { display: flex; justify-content: space-between; margin-top: 4px; font-size: 9px; font-weight: 600; opacity: 0.5; }
     .mod-search-input { background: #111 !important; border: 1px solid #333 !important; border-radius: 2rem; padding: 12px 16px; color: white; font-size: 12px; width: 100%; margin-bottom: 16px; }
+    .multiple-files-btn { background: rgba(59, 130, 246, 0.2); border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 1rem; padding: 10px 12px; font-size: 8px; font-weight: 900; text-transform: uppercase; cursor: pointer; transition: all 0.2s; }
+    .multiple-files-btn:hover { background: rgba(59, 130, 246, 0.4); }
   </style>
 </head>
 <body class="p-4 md:p-10">
@@ -505,7 +591,7 @@
       <button data-tab="reports" onclick="core.switchModTab('reports')" class="mod-tab text-[10px] font-black uppercase tracking-wider pb-4 border-b-2 border-transparent text-white/40">REPORTS</button>
       <button data-tab="logs" onclick="core.switchModTab('logs')" class="mod-tab text-[10px] font-black uppercase tracking-wider pb-4 border-b-2 border-transparent text-white/40">LOGS</button>
       <button data-tab="chat" onclick="core.switchModTab('chat')" class="mod-tab text-[10px] font-black uppercase tracking-wider pb-4 border-b-2 border-transparent text-white/40">MOD CHAT</button>
-    </div><div id="mod-users" class="mod-tab-content"><h2 class="text-[10px] font-black opacity-30 mb-4 uppercase">USERS</h2><input type="text" id="mod-user-search" class="mod-search-input" placeholder="🔍 SEARCH BY NAME OR ID..." oninput="core.filterModUsers()"><div id="mod-users-list"></div></div><div id="mod-tournaments" class="mod-tab-content hidden"><h2 class="text-[10px] font-black opacity-30 mb-6 uppercase">TOURNAMENTS</h2><div id="mod-tournaments-list"></div></div><div id="mod-reports" class="mod-tab-content hidden"><h2 class="text-[10px] font-black opacity-30 mb-6 uppercase">REPORTS</h2><div id="mod-reports-list"></div></div><div id="mod-logs" class="mod-tab-content hidden"><h2 class="text-[10px] font-black opacity-30 mb-6 uppercase">LOGS</h2><div id="mod-logs-list" class="max-h-[500px] overflow-y-auto"></div></div><div id="mod-chat" class="mod-tab-content hidden"><h2 class="text-[10px] font-black opacity-30 mb-6 uppercase">MOD CHAT</h2><div id="mod-chat-box" class="h-[400px] overflow-y-auto bg-black/30 rounded-2xl p-6 mb-4 custom-scroll"></div><div class="flex gap-3"><input type="file" id="mod-file-input" class="hidden" onchange="core.sendModFile(event)"><button onclick="document.getElementById('mod-file-input').click()" class="bg-white/5 px-4 rounded-2xl text-white/20 hover:text-blue-500 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.51a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button><button id="mod-voice-btn" class="bg-white/5 px-4 rounded-2xl text-white/20 hover:text-red-500 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg></button><input id="mod-chat-in" placeholder="MOD MESSAGE..." class="flex-1" onkeydown="if(event.key==='Enter')core.sendModChat()"><button onclick="core.sendModChat()" class="bg-blue-600 px-8 rounded-2xl font-black text-white">SEND</button></div></div></div></section>
+    </div><div id="mod-users" class="mod-tab-content"><h2 class="text-[10px] font-black opacity-30 mb-4 uppercase">USERS</h2><input type="text" id="mod-user-search" class="mod-search-input" placeholder="🔍 SEARCH BY NAME OR ID..." oninput="core.filterModUsers()"><div id="mod-users-list"></div></div><div id="mod-tournaments" class="mod-tab-content hidden"><h2 class="text-[10px] font-black opacity-30 mb-6 uppercase">TOURNAMENTS</h2><div id="mod-tournaments-list"></div></div><div id="mod-reports" class="mod-tab-content hidden"><h2 class="text-[10px] font-black opacity-30 mb-6 uppercase">REPORTS</h2><div id="mod-reports-list"></div></div><div id="mod-logs" class="mod-tab-content hidden"><h2 class="text-[10px] font-black opacity-30 mb-6 uppercase">LOGS</h2><div id="mod-logs-list" class="max-h-[500px] overflow-y-auto"></div></div><div id="mod-chat" class="mod-tab-content hidden"><h2 class="text-[10px] font-black opacity-30 mb-6 uppercase">MOD CHAT</h2><div id="mod-chat-box" class="h-[400px] overflow-y-auto bg-black/30 rounded-2xl p-6 mb-4 custom-scroll"></div><div class="flex gap-3"><input type="file" id="mod-file-input" class="hidden" multiple onchange="core.sendModMultipleFiles(event)"><button onclick="document.getElementById('mod-file-input').click()" class="multiple-files-btn flex items-center gap-2"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.51a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>📎 FILES</button><button id="mod-voice-btn" class="bg-white/5 px-4 rounded-2xl text-white/20 hover:text-red-500 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg></button><input id="mod-chat-in" placeholder="MOD MESSAGE..." class="flex-1" onkeydown="if(event.key==='Enter')core.sendModChat()"><button onclick="core.sendModChat()" class="bg-blue-600 px-8 rounded-2xl font-black text-white">SEND</button></div></div></div></section>
 
     <section id="section-lobby" class="section hidden"><div class="bg-[#080808] p-10 rounded-[3.5rem] grid grid-cols-1 lg:grid-cols-3 gap-12"><div class="lg:col-span-2"><div class="flex justify-between items-center mb-8"><button onclick="core.show('home')" class="text-[10px] font-black opacity-30 uppercase italic text-white" data-i18n="back">< BACK</button><div class="flex items-center gap-4 bg-white/5 px-6 py-3 rounded-2xl border border-white/10 shadow-xl"><div id="l-code-text" class="text-2xl font-black text-blue-500 italic tracking-tighter">CODE</div><button onclick="core.copyId(document.getElementById('l-code-text').innerText)" class="bg-white/10 px-3 py-1 rounded-lg text-[8px] font-black uppercase text-white" data-i18n="copy">COPY</button></div></div><div id="l-cover" class="h-64 bg-zinc-900 bg-cover bg-center mb-10 rounded-[2.5rem] shadow-2xl"></div><div id="ln-container" class="flex items-center gap-4 flex-wrap mb-2"></div><div id="l-owner" class="text-[9px] font-black uppercase tracking-[0.3em] mb-8 text-white"></div><div class="flex items-center gap-6 mb-12"><p id="lp" class="text-blue-500 font-black text-[10px] uppercase tracking-widest"></p><div id="l-link-box"></div></div><div id="finish-btn-container" class="w-full"></div><div class="grid grid-cols-1 md:grid-cols-2 gap-8 mb-10"><div id="t-alpha"></div><div id="t-omega"></div></div><div id="ldesc" class="bg-white/5 p-8 rounded-[1.5rem] text-[10px] opacity-40 uppercase text-white leading-relaxed"></div></div><div class="flex flex-col bg-black/40 rounded-[2.5rem] p-8 border border-white/5 h-[700px]"><div id="lobby-controls" class="mb-8"></div><div id="chat-box" class="flex-1 overflow-y-auto mb-6 custom-scroll"></div><div class="flex gap-3"><input id="chat-in" data-i18n-ph="message" class="flex-1" onkeydown="if(event.key==='Enter')core.sendMsg()"><button onclick="core.sendMsg()" class="bg-blue-600 px-6 rounded-2xl font-black text-white"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg></button></div></div></div></section>
   </main>
@@ -517,12 +603,12 @@
   <div id="mini-modal" class="fixed inset-0 z-[300000] bg-black/80 backdrop-blur-md flex items-center justify-center p-6 hidden" onclick="this.classList.add('hidden')"><div id="mini-content" onclick="event.stopPropagation()"></div></div>
   <div id="name-modal" class="fixed inset-0 z-[500000] bg-black/95 flex items-center justify-center p-6 hidden"><div class="w-full max-w-xs bg-zinc-900 p-8 rounded-[3rem] border border-white/10"><h2 class="text-[10px] font-black uppercase mb-6 text-white text-center" data-i18n="change_name">CHANGE NAME</h2><input id="edit-name-in" data-i18n-ph="name" class="mb-6"><div class="grid grid-cols-2 gap-4"><button onclick="core.saveName()" class="bg-blue-600 py-4 rounded-2xl font-black text-[10px] uppercase text-white" data-i18n="save">SAVE</button><button onclick="document.getElementById('name-modal').classList.add('hidden')" class="bg-white/5 py-4 rounded-2xl font-black text-[10px] uppercase text-white" data-i18n="cancel">CANCEL</button></div></div></div>
   <div id="link-modal" class="fixed inset-0 z-[500000] bg-black/95 flex items-center justify-center p-6 hidden"><div class="w-full max-w-xs bg-zinc-900 p-8 rounded-[3rem] border border-white/10"><h2 class="text-[10px] font-black uppercase mb-6 text-white text-center" data-i18n="social_link">SOCIAL LINK</h2><input id="link-label-in" data-i18n-ph="label" class="mb-4"><input id="link-url-in" placeholder="URL" class="mb-6"><div class="grid grid-cols-2 gap-4"><button onclick="core.saveLink()" class="bg-blue-600 py-4 rounded-2xl font-black text-[10px] uppercase text-white" data-i18n="save">SAVE</button><button onclick="document.getElementById('link-modal').classList.add('hidden')" class="bg-white/5 py-4 rounded-2xl font-black text-[10px] uppercase text-white" data-i18n="cancel">CANCEL</button></div></div></div>
-  <div id="dm-modal" class="fixed inset-0 z-[400000] bg-black/95 flex items-center justify-center p-6 hidden"><div class="w-full max-lg bg-zinc-900 rounded-[3rem] border border-white/10 h-[600px] flex flex-col overflow-hidden"><div class="p-8 border-b border-white/5 flex justify-between items-center"><div><div class="text-[8px] opacity-20 font-black uppercase mb-1">DM</div><div id="dm-target-name" class="text-xl font-black italic uppercase text-blue-500">...</div></div><button onclick="document.getElementById('dm-modal').classList.add('hidden'); currentDmId = null;" class="text-xl opacity-30 text-white">×</button></div><div id="dm-box" class="flex-1 overflow-y-auto p-8 custom-scroll"></div><input type="file" id="dm-file-input" class="hidden" onchange="core.sendDmFile(event)"><div class="p-8 bg-black/40 flex gap-3"><button onclick="document.getElementById('dm-file-input').click()" class="bg-white/5 px-4 rounded-2xl text-white/20 hover:text-blue-500 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.51a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button><button id="voice-btn" class="bg-white/5 px-4 rounded-2xl text-white/20 hover:text-red-500 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg></button><input id="dm-in" placeholder="..." class="flex-1" onkeydown="if(event.key==='Enter')core.sendDm()"><button onclick="core.sendDm()" class="bg-blue-600 px-8 rounded-2xl font-black text-white"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg></button></div></div></div>
+  <div id="dm-modal" class="fixed inset-0 z-[400000] bg-black/95 flex items-center justify-center p-6 hidden"><div class="w-full max-lg bg-zinc-900 rounded-[3rem] border border-white/10 h-[600px] flex flex-col overflow-hidden"><div class="p-8 border-b border-white/5 flex justify-between items-center"><div><div class="text-[8px] opacity-20 font-black uppercase mb-1">DM</div><div id="dm-target-name" class="text-xl font-black italic uppercase text-blue-500">...</div></div><button onclick="document.getElementById('dm-modal').classList.add('hidden'); currentDmId = null;" class="text-xl opacity-30 text-white">×</button></div><div id="dm-box" class="flex-1 overflow-y-auto p-8 custom-scroll"></div><input type="file" id="dm-file-input" class="hidden" multiple onchange="core.sendDmMultipleFiles(event)"><div class="p-8 bg-black/40 flex gap-3"><button onclick="document.getElementById('dm-file-input').click()" class="multiple-files-btn flex items-center gap-2"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.51a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>📎 FILES</button><button id="voice-btn" class="bg-white/5 px-4 rounded-2xl text-white/20 hover:text-red-500 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg></button><input id="dm-in" placeholder="..." class="flex-1" onkeydown="if(event.key==='Enter')core.sendDm()"><button onclick="core.sendDm()" class="bg-blue-600 px-8 rounded-2xl font-black text-white"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg></button></div></div></div>
   
-  <div id="report-modal" class="fixed inset-0 z-[500000] bg-black/95 flex items-center justify-center p-6 hidden"><div class="w-full max-w-md bg-zinc-900 p-8 rounded-[3rem] border border-white/10"><h2 class="text-xl font-black italic uppercase mb-6 text-red-500 text-center" data-i18n="report_title">REPORT PLAYER</h2><textarea id="report-reason" class="w-full h-24 !text-[12px] !normal-case !uppercase" placeholder="Describe the reason..."></textarea><div class="mt-4"><div class="flex items-center gap-3 mb-3"><button onclick="document.getElementById('report-screenshot-input').click()" class="bg-white/5 px-4 py-3 rounded-xl text-[8px] font-black uppercase" data-i18n="attach_screenshot">ATTACH SCREENSHOT</button><div id="report-screenshot-preview" class="w-16 h-16 bg-cover bg-center rounded-xl border border-white/10 hidden"></div></div><input type="file" id="report-screenshot-input" class="hidden" accept="image/*" onchange="core.attachReportScreenshot(event)"><input type="hidden" id="report-screenshot-data"></div><div class="flex gap-4 mt-6"><button onclick="core.submitReport()" class="flex-1 bg-red-600 py-4 rounded-2xl font-black text-[10px] uppercase text-white" data-i18n="submit_report">SEND REPORT</button><button onclick="document.getElementById('report-modal').classList.add('hidden'); pendingReportTarget=null;" class="px-8 bg-white/5 rounded-2xl font-black text-[10px] text-white uppercase" data-i18n="cancel">CANCEL</button></div></div></div>
+  <div id="report-modal" class="fixed inset-0 z-[500000] bg-black/95 flex items-center justify-center p-6 hidden"><div class="w-full max-w-md bg-zinc-900 p-8 rounded-[3rem] border border-white/10"><h2 class="text-xl font-black italic uppercase mb-6 text-red-500 text-center" data-i18n="report_title">REPORT PLAYER</h2><textarea id="report-reason" class="w-full h-24 !text-[12px] !normal-case !uppercase" placeholder="Describe the reason..."></textarea><div class="mt-4"><div class="flex items-center gap-3 mb-3"><button onclick="document.getElementById('report-files-input').click()" class="multiple-files-btn flex items-center gap-2"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.51a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>📎 ${window.t('attach_screenshot')}</button></div><input type="file" id="report-files-input" class="hidden" multiple accept="image/*,video/*,application/pdf,.txt,.doc,.docx" onchange="core.attachReportFiles(event)"><div id="report-files-list" class="mt-3 max-h-32 overflow-y-auto hidden"></div></div><div class="flex gap-4 mt-6"><button onclick="core.submitReport()" class="flex-1 bg-red-600 py-4 rounded-2xl font-black text-[10px] uppercase text-white" data-i18n="submit_report">SEND REPORT</button><button onclick="document.getElementById('report-modal').classList.add('hidden'); pendingReportTarget=null;" class="px-8 bg-white/5 rounded-2xl font-black text-[10px] text-white uppercase" data-i18n="cancel">CANCEL</button></div></div></div>
   
   <div id="edit-modal" class="fixed inset-0 z-[500000] bg-black/95 flex items-center justify-center p-6 hidden"><div class="w-full max-w-md bg-zinc-900 p-8 rounded-[3rem] border border-white/10"><h2 class="text-xl font-black italic uppercase mb-6 text-blue-500 text-center" data-i18n="edit_title">EDIT MESSAGE</h2><textarea id="edit-text-input" class="w-full h-32 !text-[12px] !normal-case !uppercase" placeholder="Edit your message..."></textarea><div class="flex gap-4 mt-6"><button onclick="core.saveEditedMessage()" class="flex-1 bg-blue-600 py-4 rounded-2xl font-black text-[10px] uppercase text-white" data-i18n="save">SAVE</button><button onclick="document.getElementById('edit-modal').classList.add('hidden'); pendingEditMsgId=null;" class="px-8 bg-white/5 rounded-2xl font-black text-[10px] text-white uppercase" data-i18n="cancel">CANCEL</button></div></div></div>
   
   <div id="edit-mod-modal" class="fixed inset-0 z-[500000] bg-black/95 flex items-center justify-center p-6 hidden"><div class="w-full max-w-md bg-zinc-900 p-8 rounded-[3rem] border border-white/10"><h2 class="text-xl font-black italic uppercase mb-6 text-blue-500 text-center" data-i18n="edit_title">EDIT MOD MESSAGE</h2><textarea id="edit-mod-text-input" class="w-full h-32 !text-[12px] !normal-case !uppercase" placeholder="Edit your message..."></textarea><div class="flex gap-4 mt-6"><button onclick="core.saveEditedModMessage()" class="flex-1 bg-blue-600 py-4 rounded-2xl font-black text-[10px] uppercase text-white" data-i18n="save">SAVE</button><button onclick="document.getElementById('edit-mod-modal').classList.add('hidden'); pendingEditModMsgId=null;" class="px-8 bg-white/5 rounded-2xl font-black text-[10px] text-white uppercase" data-i18n="cancel">CANCEL</button></div></div></div>
 </body>
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        </html>
+    </html>
