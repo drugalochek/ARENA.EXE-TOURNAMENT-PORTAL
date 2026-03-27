@@ -135,7 +135,6 @@
     window.t = (key) => i18n[window.lang][key] || key;
     window.toggleLang = () => { window.lang = window.lang === 'en' ? 'ru' : 'en'; localStorage.setItem('arena_lang', window.lang); location.reload(); };
 
-    // PRO auto-expire (30 дней)
     const PRO_DURATION_DAYS = 30;
     async function checkAndExpireProRoles() {
       const usersSnap = await get(ref(db, 'users'));
@@ -149,7 +148,6 @@
         }
       }
     }
-    setInterval(() => { if (window.core?.userData?.isMaker) checkAndExpireProRoles(); }, 60 * 60 * 1000);
 
     async function addModLog(action, targetUid = null, targetName = null, details = null) {
       if (!window.core?.u?.uid) return;
@@ -255,14 +253,12 @@
       stopRecording() { if (mediaRecorder && mediaRecorder.state !== "inactive") { mediaRecorder.stop(); document.getElementById('voice-btn').classList.remove('bg-red-600', 'animate-pulse'); } },
       async sendVoice() { if (audioChunks.length === 0) return; const blob = new Blob(audioChunks, { type: 'audio/webm' }); const reader = new FileReader(); reader.onload = async (e) => { await push(ref(db, `direct_messages/${currentDmId}`), { uid: this.u.uid, msg: e.target.result, type: 'audio', ts: Date.now() }); }; reader.readAsDataURL(blob); },
 
-      // Audio player
       stopAllAudio() { if (this.currentAudioId) { const prevAudio = document.getElementById(this.currentAudioId); if (prevAudio) { prevAudio.pause(); prevAudio.currentTime = 0; } if (this.audioWaveInterval) clearInterval(this.audioWaveInterval); this.currentAudioId = null; } document.querySelectorAll('.voice-play-btn svg').forEach(svg => { if (svg) svg.innerHTML = '<polygon points="5 3 19 12 5 21 5 3" fill="white"/>'; }); },
       toggleAudio(audioId, src) { const audio = document.getElementById(audioId); const playBtn = document.getElementById(`playBtn_${audioId}`); if (!audio) return; if (this.currentAudioId === audioId && !audio.paused) { audio.pause(); this.stopAllAudio(); return; } this.stopAllAudio(); if (!audio.src || audio.src !== src) { audio.src = src; audio.load(); } audio.play(); this.currentAudioId = audioId; const svg = playBtn?.querySelector('svg'); if (svg) svg.innerHTML = '<rect x="6" y="4" width="4" height="16" fill="white"/><rect x="14" y="4" width="4" height="16" fill="white"/>'; this.animateWaveform(audioId); this.updateAudioProgress(audioId); audio.onended = () => { this.stopAllAudio(); const endSvg = document.getElementById(`playBtn_${audioId}`)?.querySelector('svg'); if (endSvg) endSvg.innerHTML = '<polygon points="5 3 19 12 5 21 5 3" fill="white"/>'; }; },
       animateWaveform(audioId) { const waveform = document.getElementById(`waveform_${audioId}`); if (!waveform) return; const bars = waveform.querySelectorAll('.wave-bar'); if (this.audioWaveInterval) clearInterval(this.audioWaveInterval); this.audioWaveInterval = setInterval(() => { if (this.currentAudioId !== audioId) { clearInterval(this.audioWaveInterval); return; } bars.forEach(bar => { bar.style.height = `${Math.random() * 24 + 6}px`; }); }, 80); },
       updateAudioProgress(audioId) { const audio = document.getElementById(audioId); const progressFill = document.getElementById(`progressFill_${audioId}`); const currentTimeSpan = document.getElementById(`currentTime_${audioId}`); const durationSpan = document.getElementById(`duration_${audioId}`); if (!audio) return; const setDuration = () => { if (isNaN(audio.duration)) return; const m = Math.floor(audio.duration / 60), s = Math.floor(audio.duration % 60); if (durationSpan) durationSpan.innerText = `${m}:${s.toString().padStart(2, '0')}`; }; if (audio.readyState >= 1) setDuration(); else audio.addEventListener('loadedmetadata', setDuration); const update = setInterval(() => { if (this.currentAudioId !== audioId) { clearInterval(update); return; } if (audio.duration && !isNaN(audio.duration)) { const percent = (audio.currentTime / audio.duration) * 100; if (progressFill) progressFill.style.width = `${percent}%`; const m = Math.floor(audio.currentTime / 60), s = Math.floor(audio.currentTime % 60); if (currentTimeSpan) currentTimeSpan.innerText = `${m}:${s.toString().padStart(2, '0')}`; } }, 100); },
       seekAudio(audioId, event) { const audio = document.getElementById(audioId); if (!audio || !audio.duration) return; const rect = event.currentTarget.getBoundingClientRect(); audio.currentTime = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width)) * audio.duration; },
 
-      // DM с кнопками редактирования/удаления
       openEditModal(msgId, currentText) {
         pendingEditMsgId = msgId;
         document.getElementById('edit-text-input').value = currentText;
@@ -335,7 +331,6 @@
       async sendDmFile(e) { const file = e.target.files[0]; if (!file || !currentDmId) return; const reader = new FileReader(); reader.onload = async (ev) => { let type = 'file'; if (file.type.startsWith('image/')) type = 'image'; else if (file.type.startsWith('video/')) type = 'video'; else if (file.type.startsWith('audio/')) type = 'audio'; await push(ref(db, `direct_messages/${currentDmId}`), { uid: this.u.uid, msg: ev.target.result, type: type, fileName: file.name, ts: Date.now() }); }; reader.readAsDataURL(file); },
       downloadFile(base64, name) { const a = document.createElement('a'); a.href = base64; a.download = name || "file"; a.click(); },
 
-      // Кастомный репорт
       openReportModal(targetUid, targetName) {
         pendingReportTarget = { uid: targetUid, name: targetName };
         document.getElementById('report-reason').value = '';
@@ -372,14 +367,31 @@
       async openSecurityLink(url) { document.getElementById('sec-url-display').innerText = url; const modal = document.getElementById('security-modal'); modal.classList.remove('hidden'); document.getElementById('sec-connect').onclick = () => { window.open(url, '_blank'); modal.classList.add('hidden'); }; },
 
       // ========== МОДЕРАТОРСКАЯ ПАНЕЛЬ ==========
-      async renderModPanel() {
-        if (!this.isModerator()) { this.notify(window.t('access_denied'), "err"); this.show('home'); return; }
-        await this.renderModUsers();
-        await this.renderModTournaments();
-        await this.renderModReports();
-        this.renderModLogs();
-        this.initModChat();
+      modActiveTab: 'users',
+      
+      switchModTab(tabId) {
+        this.modActiveTab = tabId;
+        document.querySelectorAll('.mod-tab-content').forEach(c => c.classList.add('hidden'));
+        document.getElementById(`mod-${tabId}`).classList.remove('hidden');
+        
+        document.querySelectorAll('.mod-tab').forEach(btn => {
+          btn.classList.remove('active', 'text-blue-500', 'border-blue-500');
+          btn.classList.add('text-white/40', 'border-transparent');
+        });
+        
+        const activeBtn = document.querySelector(`.mod-tab[data-tab="${tabId}"]`);
+        if (activeBtn) {
+          activeBtn.classList.add('active', 'text-blue-500', 'border-blue-500');
+          activeBtn.classList.remove('text-white/40', 'border-transparent');
+        }
+        
+        if (tabId === 'users') this.renderModUsers();
+        if (tabId === 'tournaments') this.renderModTournaments();
+        if (tabId === 'reports') this.renderModReports();
+        if (tabId === 'logs') this.renderModLogs();
+        if (tabId === 'chat') this.initModChat();
       },
+      
       filterModUsers() {
         const searchTerm = document.getElementById('mod-user-search').value.toLowerCase();
         document.querySelectorAll('#mod-users-list .mod-user-item').forEach(item => {
@@ -388,19 +400,46 @@
           item.classList.toggle('hidden', !(name.includes(searchTerm) || uid.includes(searchTerm)));
         });
       },
+      
       async renderModUsers() {
         const container = document.getElementById('mod-users-list');
         if (!container) return;
         const usersSnap = await get(ref(db, 'users'));
         const users = usersSnap.val() || {};
         container.innerHTML = '';
+        if (Object.keys(users).length === 0) {
+          container.innerHTML = `<div class="text-center py-10 text-[8px] opacity-30 uppercase">NO USERS</div>`;
+          return;
+        }
         for (const [uid, data] of Object.entries(users)) {
           const style = this.getUserStyle(data);
           const isOnline = this.isUserOnline(uid);
           const canModerate = !data.isMaker;
-          container.innerHTML += `<div class="mod-user-item bg-white/5 p-5 rounded-2xl border border-white/10 mb-3 hover:bg-white/10 transition-all" data-name="${data.name.toLowerCase()}" data-uid="${uid.toLowerCase()}"><div class="flex justify-between items-start flex-wrap gap-3"><div class="flex items-center gap-3 cursor-pointer" onclick="core.showMini('${uid}')"><div class="relative"><div class="w-12 h-12 rounded-xl bg-cover bg-center bg-zinc-800" style="background-image:url(${data.avatar || ''})"></div><div class="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border border-black ${isOnline ? 'bg-green-500' : 'bg-gray-500'}"></div></div><div><div class="text-sm font-black uppercase ${style.class}">${data.name}</div><div class="text-[8px] opacity-30 uppercase">ID: ${uid.substring(0,8)}... | EXR: ${data.exr || 0} | ${data.isMaker ? 'MAKER' : data.isAdmin && data.isPro ? 'ELITE' : data.isAdmin ? 'ADMIN' : data.isPro ? 'PRO' : 'PLAYER'}</div></div></div><div class="flex gap-2 items-center"><button onclick="core.copyId('${uid}')" class="px-3 py-2 rounded-xl bg-white/10 text-white/60 text-[8px] font-black uppercase hover:bg-blue-600/30">${window.t('copy_id')}</button>${canModerate ? `<div class="flex flex-wrap gap-2"><button onclick="core.modBanUser('${uid}', '${data.name}', ${data.isBan || false})" class="px-4 py-2 rounded-xl text-[9px] font-black uppercase ${data.isBan ? 'bg-green-600/20 text-green-500' : 'bg-red-600/20 text-red-500'}">${data.isBan ? window.t('unban') : window.t('ban')}</button>${!data.isAdmin ? `<button onclick="core.modMakeAdmin('${uid}', '${data.name}')" class="px-4 py-2 rounded-xl bg-purple-600/20 text-purple-400 text-[9px] font-black uppercase">${window.t('make_admin')}</button>` : `<button onclick="core.modRemoveAdmin('${uid}', '${data.name}')" class="px-4 py-2 rounded-xl bg-orange-600/20 text-orange-400 text-[9px] font-black uppercase">${window.t('remove_admin')}</button>`}${!data.isPro ? `<button onclick="core.modMakePro('${uid}', '${data.name}')" class="px-4 py-2 rounded-xl bg-yellow-600/20 text-yellow-500 text-[9px] font-black uppercase">${window.t('make_pro')}</button>` : `<button onclick="core.modRemovePro('${uid}', '${data.name}')" class="px-4 py-2 rounded-xl bg-orange-600/20 text-orange-400 text-[9px] font-black uppercase">${window.t('remove_pro')}</button>`}</div>` : '<div class="text-[8px] text-purple-400 font-black">MAKER</div>'}</div></div></div>`;
+          container.innerHTML += `<div class="mod-user-item bg-white/5 p-5 rounded-2xl border border-white/10 mb-3 hover:bg-white/10 transition-all" data-name="${(data.name || '').toLowerCase()}" data-uid="${uid.toLowerCase()}">
+            <div class="flex justify-between items-start flex-wrap gap-3">
+              <div class="flex items-center gap-3 cursor-pointer" onclick="core.showMini('${uid}')">
+                <div class="relative">
+                  <div class="w-12 h-12 rounded-xl bg-cover bg-center bg-zinc-800" style="background-image:url(${data.avatar || ''})"></div>
+                  <div class="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border border-black ${isOnline ? 'bg-green-500' : 'bg-gray-500'}"></div>
+                </div>
+                <div>
+                  <div class="text-sm font-black uppercase ${style.class}">${data.name || 'UNKNOWN'}</div>
+                  <div class="text-[8px] opacity-30 uppercase">ID: ${uid.substring(0,8)}... | EXR: ${data.exr || 0} | ${data.isMaker ? 'MAKER' : data.isAdmin && data.isPro ? 'ELITE' : data.isAdmin ? 'ADMIN' : data.isPro ? 'PRO' : 'PLAYER'}</div>
+                </div>
+              </div>
+              <div class="flex gap-2 items-center">
+                <button onclick="core.copyId('${uid}')" class="px-3 py-2 rounded-xl bg-white/10 text-white/60 text-[8px] font-black uppercase hover:bg-blue-600/30">${window.t('copy_id')}</button>
+                ${canModerate ? `<div class="flex flex-wrap gap-2">
+                  <button onclick="core.modBanUser('${uid}', '${data.name || uid}', ${data.isBan || false})" class="px-4 py-2 rounded-xl text-[9px] font-black uppercase ${data.isBan ? 'bg-green-600/20 text-green-500' : 'bg-red-600/20 text-red-500'}">${data.isBan ? window.t('unban') : window.t('ban')}</button>
+                  ${!data.isAdmin ? `<button onclick="core.modMakeAdmin('${uid}', '${data.name || uid}')" class="px-4 py-2 rounded-xl bg-purple-600/20 text-purple-400 text-[9px] font-black uppercase">${window.t('make_admin')}</button>` : `<button onclick="core.modRemoveAdmin('${uid}', '${data.name || uid}')" class="px-4 py-2 rounded-xl bg-orange-600/20 text-orange-400 text-[9px] font-black uppercase">${window.t('remove_admin')}</button>`}
+                  ${!data.isPro ? `<button onclick="core.modMakePro('${uid}', '${data.name || uid}')" class="px-4 py-2 rounded-xl bg-yellow-600/20 text-yellow-500 text-[9px] font-black uppercase">${window.t('make_pro')}</button>` : `<button onclick="core.modRemovePro('${uid}', '${data.name || uid}')" class="px-4 py-2 rounded-xl bg-orange-600/20 text-orange-400 text-[9px] font-black uppercase">${window.t('remove_pro')}</button>`}
+                </div>` : '<div class="text-[8px] text-purple-400 font-black">MAKER</div>'}
+              </div>
+            </div>
+          </div>`;
         }
       },
+      
       async modBanUser(uid, name, isBanned) { if(await this.ask(isBanned ? window.t('unban_q') : window.t('ban_q'))) { await update(ref(db, `users/${uid}`), { isBan: !isBanned }); addModLog(isBanned ? 'UNBAN' : 'BAN', uid, name); this.notify(window.t('status_updated')); this.renderModUsers(); } },
       async modMakeAdmin(uid, name) { if(await this.ask(`MAKE ${name} ADMIN?`)) { await update(ref(db, `users/${uid}`), { isAdmin: true }); addModLog('MAKE_ADMIN', uid, name); this.notify(`${name} IS NOW ADMIN`); this.renderModUsers(); } },
       async modRemoveAdmin(uid, name) { if(await this.ask(`REMOVE ADMIN FROM ${name}?`)) { await update(ref(db, `users/${uid}`), { isAdmin: false }); addModLog('REMOVE_ADMIN', uid, name); this.notify(`${name} IS NO LONGER ADMIN`); this.renderModUsers(); } },
@@ -413,13 +452,49 @@
         const tSnap = await get(ref(db, 'tourneys'));
         const tours = tSnap.val() || {};
         container.innerHTML = '';
+        if (Object.keys(tours).length === 0) {
+          container.innerHTML = `<div class="text-center py-10 text-[8px] opacity-30 uppercase">NO TOURNAMENTS</div>`;
+          return;
+        }
         for (const [tid, data] of Object.entries(tours)) {
           const alphaCount = data.alpha ? Object.keys(data.alpha).length : 0;
           const omegaCount = data.omega ? Object.keys(data.omega).length : 0;
-          container.innerHTML += `<div class="bg-white/5 p-5 rounded-2xl border border-white/10 mb-3"><div class="flex justify-between items-start flex-wrap gap-3"><div><div class="text-lg font-black italic uppercase text-white">${data.name}</div><div class="text-[8px] opacity-30 mt-1">${data.code} | ${data.format} | ${alphaCount}+${omegaCount} players</div></div><div class="flex gap-2"><button onclick="core.openLobby('${tid}')" class="px-4 py-2 rounded-xl bg-blue-600/20 text-blue-400 text-[9px] font-black uppercase">VIEW</button><button onclick="core.modForceFinish('${tid}', '${data.name}')" class="px-4 py-2 rounded-xl bg-red-600/20 text-red-500 text-[9px] font-black uppercase">${window.t('force_finish')}</button><button onclick="core.deleteTourney('${tid}')" class="px-4 py-2 rounded-xl bg-white/10 text-white/40 text-[9px] font-black uppercase">${window.t('delete_event')}</button></div></div></div>`;
+          container.innerHTML += `<div class="bg-white/5 p-5 rounded-2xl border border-white/10 mb-3">
+            <div class="flex justify-between items-start flex-wrap gap-3">
+              <div>
+                <div class="text-lg font-black italic uppercase text-white">${data.name || 'NO NAME'}</div>
+                <div class="text-[8px] opacity-30 mt-1">${data.code || 'NO CODE'} | ${data.format || 'N/A'} | ${alphaCount}+${omegaCount} players</div>
+              </div>
+              <div class="flex gap-2">
+                <button onclick="core.openLobby('${tid}')" class="px-4 py-2 rounded-xl bg-blue-600/20 text-blue-400 text-[9px] font-black uppercase">VIEW</button>
+                <button onclick="core.modForceFinish('${tid}', '${data.name || 'TOURNAMENT'}')" class="px-4 py-2 rounded-xl bg-red-600/20 text-red-500 text-[9px] font-black uppercase">${window.t('force_finish')}</button>
+                <button onclick="core.deleteTourney('${tid}')" class="px-4 py-2 rounded-xl bg-white/10 text-white/40 text-[9px] font-black uppercase">${window.t('delete_event')}</button>
+              </div>
+            </div>
+          </div>`;
         }
       },
-      async modForceFinish(tid, name) { if(await this.ask(`FORCE FINISH ${name}?`)) { const tSnap = await get(ref(db, `tourneys/${tid}`)); const t = tSnap.val(); if (t && t.alpha && t.omega) { for (const uid of Object.keys(t.alpha)) { await update(ref(db, `users/${uid}`), { exr: increment(25), wins: increment(1) }); } for (const uid of Object.keys(t.omega)) { await update(ref(db, `users/${uid}`), { exr: increment(-15), losses: increment(1) }); } } await remove(ref(db, `tourneys/${tid}`)); await remove(ref(db, `chats/${tid}`)); addModLog('FORCE_FINISH_TOURNAMENT', null, null, name); this.notify(`TOURNAMENT ${name} FORCE FINISHED`); this.renderModTournaments(); this.loadList(); } },
+      
+      async modForceFinish(tid, name) { 
+        if(await this.ask(`FORCE FINISH ${name}?`)) { 
+          const tSnap = await get(ref(db, `tourneys/${tid}`)); 
+          const t = tSnap.val(); 
+          if (t && t.alpha && t.omega) { 
+            for (const uid of Object.keys(t.alpha)) { 
+              await update(ref(db, `users/${uid}`), { exr: increment(25), wins: increment(1) }); 
+            } 
+            for (const uid of Object.keys(t.omega)) { 
+              await update(ref(db, `users/${uid}`), { exr: increment(-15), losses: increment(1) }); 
+            } 
+          } 
+          await remove(ref(db, `tourneys/${tid}`)); 
+          await remove(ref(db, `chats/${tid}`)); 
+          addModLog('FORCE_FINISH_TOURNAMENT', null, null, name); 
+          this.notify(`TOURNAMENT ${name} FORCE FINISHED`); 
+          this.renderModTournaments(); 
+          this.loadList(); 
+        } 
+      },
       
       async renderModReports() { 
         const container = document.getElementById('mod-reports-list');
@@ -432,11 +507,38 @@
           return; 
         }
         for (const [rid, data] of Object.entries(reports)) {
-          container.innerHTML += `<div class="bg-white/5 p-5 rounded-2xl border border-white/10 mb-3"><div class="flex justify-between items-start flex-wrap gap-3"><div class="flex-1"><div class="text-[10px] font-black uppercase text-red-400">${data.reporterName} → ${data.reportedName}</div><div class="text-[9px] opacity-60 mt-2">${data.reason}</div><div class="text-[7px] opacity-20 mt-1">${new Date(data.timestamp).toLocaleString()}</div></div><div class="flex gap-2"><button onclick="core.modResolveReport('${rid}', '${data.reportedUid}', '${data.reportedName}')" class="px-4 py-2 rounded-xl bg-green-600/20 text-green-500 text-[9px] font-black uppercase">BAN & RESOLVE</button><button onclick="core.modDismissReport('${rid}')" class="px-4 py-2 rounded-xl bg-white/10 text-white/40 text-[9px] font-black uppercase">DISMISS</button></div></div></div>`;
+          container.innerHTML += `<div class="bg-white/5 p-5 rounded-2xl border border-white/10 mb-3">
+            <div class="flex justify-between items-start flex-wrap gap-3">
+              <div class="flex-1">
+                <div class="text-[10px] font-black uppercase text-red-400">${data.reporterName || 'UNKNOWN'} → ${data.reportedName || 'UNKNOWN'}</div>
+                <div class="text-[9px] opacity-60 mt-2">${data.reason || 'NO REASON'}</div>
+                <div class="text-[7px] opacity-20 mt-1">${data.timestamp ? new Date(data.timestamp).toLocaleString() : 'NO DATE'}</div>
+              </div>
+              <div class="flex gap-2">
+                <button onclick="core.modResolveReport('${rid}', '${data.reportedUid || ''}', '${data.reportedName || ''}')" class="px-4 py-2 rounded-xl bg-green-600/20 text-green-500 text-[9px] font-black uppercase">BAN & RESOLVE</button>
+                <button onclick="core.modDismissReport('${rid}')" class="px-4 py-2 rounded-xl bg-white/10 text-white/40 text-[9px] font-black uppercase">DISMISS</button>
+              </div>
+            </div>
+          </div>`;
         }
       },
-      async modResolveReport(rid, reportedUid, reportedName) { await update(ref(db, `users/${reportedUid}`), { isBan: true }); await remove(ref(db, `reports/${rid}`)); addModLog('BAN_FROM_REPORT', reportedUid, reportedName); this.notify(`${reportedName} BANNED FROM REPORT`); this.renderModReports(); this.renderModUsers(); },
-      async modDismissReport(rid) { await remove(ref(db, `reports/${rid}`)); this.notify('REPORT DISMISSED'); this.renderModReports(); },
+      
+      async modResolveReport(rid, reportedUid, reportedName) { 
+        if (reportedUid) {
+          await update(ref(db, `users/${reportedUid}`), { isBan: true }); 
+        }
+        await remove(ref(db, `reports/${rid}`)); 
+        addModLog('BAN_FROM_REPORT', reportedUid, reportedName); 
+        this.notify(`${reportedName || 'User'} BANNED FROM REPORT`); 
+        this.renderModReports(); 
+        this.renderModUsers(); 
+      },
+      
+      async modDismissReport(rid) { 
+        await remove(ref(db, `reports/${rid}`)); 
+        this.notify('REPORT DISMISSED'); 
+        this.renderModReports(); 
+      },
       
       renderModLogs() { 
         const container = document.getElementById('mod-logs-list');
@@ -445,8 +547,19 @@
         onValue(logsRef, (snap) => {
           const logs = snap.val() || {};
           container.innerHTML = '';
+          if (Object.keys(logs).length === 0) {
+            container.innerHTML = `<div class="text-center py-10 text-[8px] opacity-30 uppercase">NO LOGS</div>`;
+            return;
+          }
           Object.entries(logs).reverse().forEach(([lid, data]) => {
-            container.innerHTML += `<div class="bg-white/5 p-4 rounded-xl border border-white/5 mb-2"><div class="flex justify-between items-start text-[9px] flex-wrap gap-2"><span class="text-blue-400 font-black">${data.adminName}</span><span class="text-white/60">${data.action}</span><span class="text-white/30 text-[8px]">${data.targetName || data.details || '-'}</span><span class="text-white/20 text-[7px]">${new Date(data.timestamp).toLocaleString()}</span></div></div>`;
+            container.innerHTML += `<div class="bg-white/5 p-4 rounded-xl border border-white/5 mb-2">
+              <div class="flex justify-between items-start text-[9px] flex-wrap gap-2">
+                <span class="text-blue-400 font-black">${data.adminName || 'SYSTEM'}</span>
+                <span class="text-white/60">${data.action || 'UNKNOWN'}</span>
+                <span class="text-white/30 text-[8px]">${data.targetName || data.details || '-'}</span>
+                <span class="text-white/20 text-[7px]">${data.timestamp ? new Date(data.timestamp).toLocaleString() : 'NO DATE'}</span>
+              </div>
+            </div>`;
           });
         });
       },
@@ -461,12 +574,31 @@
           snap.forEach(msg => {
             const v = msg.val();
             const isMe = v.uid === this.u.uid;
-            container.innerHTML += `<div class="flex flex-col ${isMe ? 'items-end' : 'items-start'} mb-3"><div class="text-[6px] opacity-30 mb-1">${v.name}</div><div class="px-4 py-2 rounded-xl text-[9px] font-black ${isMe ? 'bg-blue-600/30 text-blue-400' : 'bg-white/10 text-white/70'}">${v.msg}</div></div>`;
+            container.innerHTML += `<div class="flex flex-col ${isMe ? 'items-end' : 'items-start'} mb-3">
+              <div class="text-[6px] opacity-30 mb-1">${v.name || 'UNKNOWN'}</div>
+              <div class="px-4 py-2 rounded-xl text-[9px] font-black ${isMe ? 'bg-blue-600/30 text-blue-400' : 'bg-white/10 text-white/70'}">${v.msg || ''}</div>
+            </div>`;
             container.scrollTop = container.scrollHeight;
           });
         });
       },
-      async sendModChat() { const input = document.getElementById('mod-chat-in'); if (!input.value.trim()) return; await push(ref(db, 'mod_chat'), { uid: this.u.uid, name: this.userData.name, msg: input.value.trim(), timestamp: Date.now() }); input.value = ''; },
+      
+      async sendModChat() { 
+        const input = document.getElementById('mod-chat-in'); 
+        if (!input.value.trim()) return; 
+        await push(ref(db, 'mod_chat'), { uid: this.u.uid, name: this.userData.name, msg: input.value.trim(), timestamp: Date.now() }); 
+        input.value = ''; 
+      },
+
+      async renderModPanel() {
+        if (!this.isModerator()) { this.notify(window.t('access_denied'), "err"); this.show('home'); return; }
+        await this.renderModUsers();
+        await this.renderModTournaments();
+        await this.renderModReports();
+        this.renderModLogs();
+        this.initModChat();
+        this.switchModTab('users');
+      },
 
       async showMini(uid) {
         const s = await get(ref(db, `users/${uid}`)), d = s.val(); if(!d) return;
@@ -682,7 +814,7 @@
     #p-logout-btn:hover { background: #b91c1c !important; transform: scale(1.02); }
     .exe-blue { color: #3b82f6 !important; font-weight: 900; }
     .mod-tab { cursor: pointer; transition: all 0.2s; }
-    .mod-tab.active { border-bottom-color: #3b82f6 !important; color: #3b82f6 !important; }
+    .mod-tab.active { border-bottom-color: #3b82f6 !important; color: #3b82f6 !important; border-bottom-width: 2px !important; }
     .voice-message { background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.2); border-radius: 1rem; padding: 12px; min-width: 240px; transition: all 0.2s; }
     .voice-message:hover { background: rgba(59, 130, 246, 0.15); border-color: rgba(59, 130, 246, 0.4); }
     .voice-play-btn { width: 36px; height: 36px; border-radius: 50%; background: #3b82f6; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.2s; flex-shrink: 0; }
@@ -713,7 +845,13 @@
 
     <section id="section-profile" class="section hidden"><div class="bg-[#080808] rounded-[3.5rem] overflow-hidden"><div id="p-banner" class="h-64 md:h-80 bg-zinc-900 bg-cover bg-center relative"><div id="p-avatar-wrap" class="absolute -bottom-12 md:-bottom-16 left-8 md:left-12"></div></div><input type="file" id="ai-set" class="hidden" accept="image/*" onchange="core.uploadMedia(event, 'avatar')"><input type="file" id="bi-set" class="hidden" accept="image/*" onchange="core.uploadMedia(event, 'banner')"><div class="p-8 md:p-16 pt-20 md:pt-24"><div id="p-name-container"></div><div id="p-sub-container"></div><div class="grid grid-cols-1 md:grid-cols-3 gap-10 mt-16"><div class="md:col-span-2"><div class="grid grid-cols-2 gap-4"><div id="p-exr-container" class="col-span-2"></div><div class="bg-white/5 p-8 text-center rounded-[2rem] border border-white/5 col-span-2"><p id="p-hours" class="text-white font-black italic stats-fit">0H</p><p class="text-[8px] opacity-30 uppercase mt-4 text-white" data-i18n="hours">ONLINE</p></div><div class="col-span-2"><div class="grid grid-cols-2 gap-4"><div class="bg-white/5 p-8 rounded-[2rem] border border-white/5"><p class="text-blue-400 font-black text-3xl" id="p-wins">0</p><p class="text-[8px] opacity-30 uppercase mt-2" data-i18n="wins">WINS</p></div><div class="bg-white/5 p-8 rounded-[2rem] border border-white/5"><p class="text-red-400 font-black text-3xl" id="p-losses">0</p><p class="text-[8px] opacity-30 uppercase mt-2" data-i18n="losses">LOSSES</p></div></div></div></div><div class="mt-8"><div id="p-links"></div><div id="p-edit-controls" class="hidden"></div></div></div><div><div class="bg-white/5 p-8 rounded-[2.5rem] border border-white/5"><h3 class="text-[8px] font-black opacity-30 tracking-[0.4em] uppercase mb-6 text-white" data-i18n="friends">FRIENDS</h3><div id="p-friends-list" class="max-h-[400px] overflow-y-auto custom-scroll"></div></div><div class="promo-card mx-auto"><div class="flex items-center gap-5 mb-4"><div class="w-16 h-16 shrink-0 bg-cover bg-center rounded-2xl yandex-border" style="background-image: url('EDApic.png');"></div><div class="flex flex-col"><span class="text-[9px] font-black uppercase text-white tracking-widest mb-1" data-i18n="yandex_title">Yandex Food</span><h4 class="text-[11px] font-black uppercase italic text-white leading-none" data-i18n="yandex_sub">Become a courier</h4></div></div><p class="text-[7px] font-bold opacity-30 uppercase text-white" data-i18n="yandex_desc">Flexible schedule, daily payments and free uniform.</p><a href="https://reg.eda.yandex.ru/?advertisement_campaign=forms_for_agents&user_invite_code=208d82dc0c13481c9922ff27bd1773a2&utm_content=blank" target="_blank" class="eda-btn font-black block text-center mt-4 !py-3" data-i18n="yandex_apply">Apply now</a></div><div class="promo-card mx-auto mt-4"><div class="flex items-center gap-5 mb-4"><div class="w-16 h-16 shrink-0 bg-cover bg-center rounded-2xl border-4 border-blue-600 shadow-lg shadow-blue-600/30" style="background-image: url('ICO_ARENA.PNG');"></div><div class="flex flex-col"><span class="text-[9px] font-black uppercase text-white tracking-widest mb-1" data-i18n="android_title">ARENA.EXE mobile</span><h4 class="text-[11px] font-black uppercase italic text-blue-500 leading-none">ARENA.EXE</h4></div></div><p class="text-[7px] font-bold opacity-30 uppercase leading-relaxed text-white" data-i18n="android_desc">Tournaments always at hand. Only for Android devices.</p><a href="ARENA.EXE mobile.apk" download class="apk-btn font-black block text-center mt-4 !py-3" data-i18n="download_apk">DOWNLOAD EXE</a></div><div class="promo-card mx-auto mt-4"><div class="flex items-center gap-5 mb-4"><div class="w-16 h-16 shrink-0 bg-cover bg-center rounded-2xl border-4 border-blue-600 shadow-lg shadow-blue-600/30" style="background-image: url('PicsArt_03-13-11.37.05.png');"></div><div class="flex flex-col"><span class="text-[9px] font-black uppercase text-white tracking-widest mb-1">ClipboardGlass</span><h4 class="text-[11px] font-black uppercase italic text-blue-500 leading-none">ClipboardGlass.exe</h4></div></div><p class="text-[7px] font-bold opacity-30 uppercase leading-relaxed text-white">Convenient exchange buffer. Cross-platform clipboard manager.</p><a href="ClipboardGlass.exe" download class="bg-blue-600 font-black block text-center mt-4 !py-3 rounded-2xl text-[9px] uppercase tracking-widest text-white hover:bg-blue-700 transition-colors">DOWNLOAD EXE</a></div></div></div><button id="p-logout-btn" onclick="signOut(auth).then(() => { localStorage.clear(); location.reload(); })" class="mt-16 w-full py-6 rounded-[2rem] font-black text-[10px] uppercase tracking-[0.15em]">DISCONNECT</button></div></div></section>
 
-    <section id="section-mod" class="section hidden"><div class="bg-[#080808] rounded-[3.5rem] p-8"><h1 class="text-3xl font-black italic uppercase mb-8 text-red-500">⚡ MODERATOR PANEL</h1><div class="flex gap-6 border-b border-white/10 mb-8 overflow-x-auto"><button onclick="document.querySelectorAll('.mod-tab-content').forEach(c=>c.classList.add('hidden')); document.getElementById('mod-users').classList.remove('hidden'); this.classList.add('active');" class="mod-tab active text-[10px] font-black uppercase tracking-wider pb-4 border-b-2 border-blue-500 text-blue-500">USERS</button><button onclick="document.querySelectorAll('.mod-tab-content').forEach(c=>c.classList.add('hidden')); document.getElementById('mod-tournaments').classList.remove('hidden'); this.classList.add('active');" class="mod-tab text-[10px] font-black uppercase tracking-wider pb-4 border-b-2 border-transparent text-white/40">TOURNAMENTS</button><button onclick="document.querySelectorAll('.mod-tab-content').forEach(c=>c.classList.add('hidden')); document.getElementById('mod-reports').classList.remove('hidden'); this.classList.add('active');" class="mod-tab text-[10px] font-black uppercase tracking-wider pb-4 border-b-2 border-transparent text-white/40">REPORTS</button><button onclick="document.querySelectorAll('.mod-tab-content').forEach(c=>c.classList.add('hidden')); document.getElementById('mod-logs').classList.remove('hidden'); this.classList.add('active');" class="mod-tab text-[10px] font-black uppercase tracking-wider pb-4 border-b-2 border-transparent text-white/40">LOGS</button><button onclick="document.querySelectorAll('.mod-tab-content').forEach(c=>c.classList.add('hidden')); document.getElementById('mod-chat').classList.remove('hidden'); this.classList.add('active');" class="mod-tab text-[10px] font-black uppercase tracking-wider pb-4 border-b-2 border-transparent text-white/40">MOD CHAT</button></div><div id="mod-users" class="mod-tab-content"><h2 class="text-[10px] font-black opacity-30 mb-4 uppercase">USERS</h2><input type="text" id="mod-user-search" class="mod-search-input" placeholder="🔍 SEARCH BY NAME OR ID..." oninput="core.filterModUsers()"><div id="mod-users-list"></div></div><div id="mod-tournaments" class="mod-tab-content hidden"><h2 class="text-[10px] font-black opacity-30 mb-6 uppercase">TOURNAMENTS</h2><div id="mod-tournaments-list"></div></div><div id="mod-reports" class="mod-tab-content hidden"><h2 class="text-[10px] font-black opacity-30 mb-6 uppercase">REPORTS</h2><div id="mod-reports-list"></div></div><div id="mod-logs" class="mod-tab-content hidden"><h2 class="text-[10px] font-black opacity-30 mb-6 uppercase">LOGS</h2><div id="mod-logs-list" class="max-h-[500px] overflow-y-auto"></div></div><div id="mod-chat" class="mod-tab-content hidden"><h2 class="text-[10px] font-black opacity-30 mb-6 uppercase">MOD CHAT</h2><div id="mod-chat-box" class="h-[400px] overflow-y-auto bg-black/30 rounded-2xl p-6 mb-4 custom-scroll"></div><div class="flex gap-3"><input id="mod-chat-in" placeholder="MOD MESSAGE..." class="flex-1" onkeydown="if(event.key==='Enter')core.sendModChat()"><button onclick="core.sendModChat()" class="bg-blue-600 px-8 rounded-2xl font-black text-white">SEND</button></div></div></div></section>
+    <section id="section-mod" class="section hidden"><div class="bg-[#080808] rounded-[3.5rem] p-8"><h1 class="text-3xl font-black italic uppercase mb-8 text-red-500">⚡ MODERATOR PANEL</h1><div class="flex gap-6 border-b border-white/10 mb-8 overflow-x-auto">
+      <button data-tab="users" onclick="core.switchModTab('users')" class="mod-tab active text-[10px] font-black uppercase tracking-wider pb-4 border-b-2 border-blue-500 text-blue-500">USERS</button>
+      <button data-tab="tournaments" onclick="core.switchModTab('tournaments')" class="mod-tab text-[10px] font-black uppercase tracking-wider pb-4 border-b-2 border-transparent text-white/40">TOURNAMENTS</button>
+      <button data-tab="reports" onclick="core.switchModTab('reports')" class="mod-tab text-[10px] font-black uppercase tracking-wider pb-4 border-b-2 border-transparent text-white/40">REPORTS</button>
+      <button data-tab="logs" onclick="core.switchModTab('logs')" class="mod-tab text-[10px] font-black uppercase tracking-wider pb-4 border-b-2 border-transparent text-white/40">LOGS</button>
+      <button data-tab="chat" onclick="core.switchModTab('chat')" class="mod-tab text-[10px] font-black uppercase tracking-wider pb-4 border-b-2 border-transparent text-white/40">MOD CHAT</button>
+    </div><div id="mod-users" class="mod-tab-content"><h2 class="text-[10px] font-black opacity-30 mb-4 uppercase">USERS</h2><input type="text" id="mod-user-search" class="mod-search-input" placeholder="🔍 SEARCH BY NAME OR ID..." oninput="core.filterModUsers()"><div id="mod-users-list"></div></div><div id="mod-tournaments" class="mod-tab-content hidden"><h2 class="text-[10px] font-black opacity-30 mb-6 uppercase">TOURNAMENTS</h2><div id="mod-tournaments-list"></div></div><div id="mod-reports" class="mod-tab-content hidden"><h2 class="text-[10px] font-black opacity-30 mb-6 uppercase">REPORTS</h2><div id="mod-reports-list"></div></div><div id="mod-logs" class="mod-tab-content hidden"><h2 class="text-[10px] font-black opacity-30 mb-6 uppercase">LOGS</h2><div id="mod-logs-list" class="max-h-[500px] overflow-y-auto"></div></div><div id="mod-chat" class="mod-tab-content hidden"><h2 class="text-[10px] font-black opacity-30 mb-6 uppercase">MOD CHAT</h2><div id="mod-chat-box" class="h-[400px] overflow-y-auto bg-black/30 rounded-2xl p-6 mb-4 custom-scroll"></div><div class="flex gap-3"><input id="mod-chat-in" placeholder="MOD MESSAGE..." class="flex-1" onkeydown="if(event.key==='Enter')core.sendModChat()"><button onclick="core.sendModChat()" class="bg-blue-600 px-8 rounded-2xl font-black text-white">SEND</button></div></div></div></section>
 
     <section id="section-lobby" class="section hidden"><div class="bg-[#080808] p-10 rounded-[3.5rem] grid grid-cols-1 lg:grid-cols-3 gap-12"><div class="lg:col-span-2"><div class="flex justify-between items-center mb-8"><button onclick="core.show('home')" class="text-[10px] font-black opacity-30 uppercase italic text-white" data-i18n="back">< BACK</button><div class="flex items-center gap-4 bg-white/5 px-6 py-3 rounded-2xl border border-white/10 shadow-xl"><div id="l-code-text" class="text-2xl font-black text-blue-500 italic tracking-tighter">CODE</div><button onclick="core.copyId(document.getElementById('l-code-text').innerText)" class="bg-white/10 px-3 py-1 rounded-lg text-[8px] font-black uppercase text-white" data-i18n="copy">COPY</button></div></div><div id="l-cover" class="h-64 bg-zinc-900 bg-cover bg-center mb-10 rounded-[2.5rem] shadow-2xl"></div><div id="ln-container" class="flex items-center gap-4 flex-wrap mb-2"></div><div id="l-owner" class="text-[9px] font-black uppercase tracking-[0.3em] mb-8 text-white"></div><div class="flex items-center gap-6 mb-12"><p id="lp" class="text-blue-500 font-black text-[10px] uppercase tracking-widest"></p><div id="l-link-box"></div></div><div id="finish-btn-container" class="w-full"></div><div class="grid grid-cols-1 md:grid-cols-2 gap-8 mb-10"><div id="t-alpha"></div><div id="t-omega"></div></div><div id="ldesc" class="bg-white/5 p-8 rounded-[1.5rem] text-[10px] opacity-40 uppercase text-white leading-relaxed"></div></div><div class="flex flex-col bg-black/40 rounded-[2.5rem] p-8 border border-white/5 h-[700px]"><div id="lobby-controls" class="mb-8"></div><div id="chat-box" class="flex-1 overflow-y-auto mb-6 custom-scroll"></div><div class="flex gap-3"><input id="chat-in" data-i18n-ph="message" class="flex-1" onkeydown="if(event.key==='Enter')core.sendMsg()"><button onclick="core.sendMsg()" class="bg-blue-600 px-6 rounded-2xl font-black text-white"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg></button></div></div></div></section>
   </main>
@@ -727,10 +865,8 @@
   <div id="link-modal" class="fixed inset-0 z-[500000] bg-black/95 flex items-center justify-center p-6 hidden"><div class="w-full max-w-xs bg-zinc-900 p-8 rounded-[3rem] border border-white/10"><h2 class="text-[10px] font-black uppercase mb-6 text-white text-center" data-i18n="social_link">SOCIAL LINK</h2><input id="link-label-in" data-i18n-ph="label" class="mb-4"><input id="link-url-in" placeholder="URL" class="mb-6"><div class="grid grid-cols-2 gap-4"><button onclick="core.saveLink()" class="bg-blue-600 py-4 rounded-2xl font-black text-[10px] uppercase text-white" data-i18n="save">SAVE</button><button onclick="document.getElementById('link-modal').classList.add('hidden')" class="bg-white/5 py-4 rounded-2xl font-black text-[10px] uppercase text-white" data-i18n="cancel">CANCEL</button></div></div></div>
   <div id="dm-modal" class="fixed inset-0 z-[400000] bg-black/95 flex items-center justify-center p-6 hidden"><div class="w-full max-lg bg-zinc-900 rounded-[3rem] border border-white/10 h-[600px] flex flex-col overflow-hidden"><div class="p-8 border-b border-white/5 flex justify-between items-center"><div><div class="text-[8px] opacity-20 font-black uppercase mb-1">DM</div><div id="dm-target-name" class="text-xl font-black italic uppercase text-blue-500">...</div></div><button onclick="document.getElementById('dm-modal').classList.add('hidden'); currentDmId = null;" class="text-xl opacity-30 text-white">×</button></div><div id="dm-box" class="flex-1 overflow-y-auto p-8 custom-scroll"></div><input type="file" id="dm-file-input" class="hidden" onchange="core.sendDmFile(event)"><div class="p-8 bg-black/40 flex gap-3"><button onclick="document.getElementById('dm-file-input').click()" class="bg-white/5 px-4 rounded-2xl text-white/20 hover:text-blue-500 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.51a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button><button id="voice-btn" class="bg-white/5 px-4 rounded-2xl text-white/20 hover:text-red-500 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg></button><input id="dm-in" placeholder="..." class="flex-1" onkeydown="if(event.key==='Enter')core.sendDm()"><button onclick="core.sendDm()" class="bg-blue-600 px-8 rounded-2xl font-black text-white"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg></button></div></div></div>
   
-  <!-- Report Modal -->
   <div id="report-modal" class="fixed inset-0 z-[500000] bg-black/95 flex items-center justify-center p-6 hidden"><div class="w-full max-w-md bg-zinc-900 p-8 rounded-[3rem] border border-white/10"><h2 class="text-xl font-black italic uppercase mb-6 text-red-500 text-center" data-i18n="report_title">REPORT PLAYER</h2><textarea id="report-reason" class="w-full h-32 !text-[12px] !normal-case !uppercase" placeholder="Describe the reason..."></textarea><div class="flex gap-4 mt-6"><button onclick="core.submitReport()" class="flex-1 bg-red-600 py-4 rounded-2xl font-black text-[10px] uppercase text-white" data-i18n="submit_report">SEND REPORT</button><button onclick="document.getElementById('report-modal').classList.add('hidden'); pendingReportTarget=null;" class="px-8 bg-white/5 rounded-2xl font-black text-[10px] text-white uppercase" data-i18n="cancel">CANCEL</button></div></div></div>
   
-  <!-- Edit Modal -->
   <div id="edit-modal" class="fixed inset-0 z-[500000] bg-black/95 flex items-center justify-center p-6 hidden"><div class="w-full max-w-md bg-zinc-900 p-8 rounded-[3rem] border border-white/10"><h2 class="text-xl font-black italic uppercase mb-6 text-blue-500 text-center" data-i18n="edit_title">EDIT MESSAGE</h2><textarea id="edit-text-input" class="w-full h-32 !text-[12px] !normal-case !uppercase" placeholder="Edit your message..."></textarea><div class="flex gap-4 mt-6"><button onclick="core.saveEditedMessage()" class="flex-1 bg-blue-600 py-4 rounded-2xl font-black text-[10px] uppercase text-white" data-i18n="save">SAVE</button><button onclick="document.getElementById('edit-modal').classList.add('hidden'); pendingEditMsgId=null;" class="px-8 bg-white/5 rounded-2xl font-black text-[10px] text-white uppercase" data-i18n="cancel">CANCEL</button></div></div></div>
 </body>
     </html>
