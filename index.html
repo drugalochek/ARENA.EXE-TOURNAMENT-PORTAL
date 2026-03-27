@@ -36,12 +36,12 @@
     let currentDmId = null;
     let isInitialLoad = true;
     let editingLinkId = null;
-    let mediaRecorder = null;
-    let audioChunks = [];
     let editingTourneyId = null;
     let onlineUsers = {};
     let pendingReportTarget = null;
     let pendingEditMsgId = null;
+    let pendingEditModMsgId = null;
+    let currentModChatMsgId = null;
 
     const msgIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>`;
     const editIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3l4 4-7 7H10v-4l7-7z"/><path d="M4 20h16"/></svg>`;
@@ -81,7 +81,8 @@
         ban: "BAN", unban: "UNBAN", make_admin: "MAKE ADMIN", make_pro: "MAKE PRO", remove_admin: "REMOVE ADMIN", remove_pro: "REMOVE PRO",
         report_reason: "REPORT REASON", submit_report: "SUBMIT REPORT", no_reports: "NO REPORTS", 
         mod_actions: "MOD ACTIONS", force_finish: "FORCE FINISH", close_reg: "CLOSE REG", copy_id: "COPY ID",
-        report_title: "REPORT PLAYER", report_placeholder: "Describe the reason...", edit_title: "EDIT MESSAGE"
+        report_title: "REPORT PLAYER", report_placeholder: "Describe the reason...", edit_title: "EDIT MESSAGE",
+        attach_screenshot: "ATTACH SCREENSHOT"
       },
       ru: {
         discover: "ОБЗОР", create: "СОЗДАТЬ", profile: "ПРОФИЛЬ", mod: "МОД", exr: "EXR", hours: "ОНЛАЙН", 
@@ -115,7 +116,8 @@
         ban: "ЗАБАНИТЬ", unban: "РАЗБАНИТЬ", make_admin: "СДЕЛАТЬ АДМИНОМ", make_pro: "СДЕЛАТЬ PRO", remove_admin: "УБРАТЬ АДМИНА", remove_pro: "УБРАТЬ PRO",
         report_reason: "ПРИЧИНА ЖАЛОБЫ", submit_report: "ОТПРАВИТЬ ЖАЛОБУ", no_reports: "НЕТ ЖАЛОБ", 
         mod_actions: "ДЕЙСТВИЯ МОДЕРАТОРА", force_finish: "ПРИНУДИТЕЛЬНО ЗАВЕРШИТЬ", close_reg: "ЗАКРЫТЬ РЕГ.", copy_id: "КОПИ ID",
-        report_title: "ПОЖАЛОВАТЬСЯ", report_placeholder: "Опишите причину...", edit_title: "РЕДАКТИРОВАТЬ"
+        report_title: "ПОЖАЛОВАТЬСЯ", report_placeholder: "Опишите причину...", edit_title: "РЕДАКТИРОВАТЬ",
+        attach_screenshot: "ПРИКРЕПИТЬ СКРИНШОТ"
       }
     };
 
@@ -157,6 +159,9 @@
     window.core = {
       u: null, userData: null, currentTid: null, tempCover: "",
       currentAudioId: null, audioWaveInterval: null,
+      currentModAudioId: null, modAudioWaveInterval: null,
+      mediaRecorder: null, audioChunks: [],
+      modMediaRecorder: null, modAudioChunks: [],
 
       getExrLevel(exr) { for (const l of EXR_LEVELS) if (exr >= l.min && exr <= l.max) return l; return EXR_LEVELS[0]; },
       getExrProgress(exr) { const l = this.getExrLevel(exr); if (l.level === 10) return 100; return Math.min(100, Math.max(0, Math.floor(((exr - l.min) / (l.max - l.min)) * 100))); },
@@ -188,18 +193,8 @@
       },
 
       async copyId(text) { 
-        try { 
-          await navigator.clipboard.writeText(text); 
-          this.notify(window.t('copied') + text); 
-        } catch(err) { 
-          const input = document.createElement('input'); 
-          input.value = text; 
-          document.body.appendChild(input); 
-          input.select(); 
-          document.execCommand('copy'); 
-          document.body.removeChild(input); 
-          this.notify(window.t('copied') + text); 
-        } 
+        try { await navigator.clipboard.writeText(text); this.notify(window.t('copied') + text); } 
+        catch(err) { const input = document.createElement('input'); input.value = text; document.body.appendChild(input); input.select(); document.execCommand('copy'); document.body.removeChild(input); this.notify(window.t('copied') + text); } 
       },
       
       async ask(txt) { return new Promise((res) => { const m = document.getElementById('confirm-modal'); document.getElementById('confirm-text').innerText = txt.toUpperCase(); document.getElementById('confirm-yes').classList.remove('hidden'); document.getElementById('confirm-no').classList.remove('hidden'); document.getElementById('confirm-cancel').classList.add('hidden'); document.getElementById('confirm-yes').innerText = window.lang === 'ru' ? 'ДА' : 'YES'; document.getElementById('confirm-no').innerText = window.lang === 'ru' ? 'НЕТ' : 'NO'; m.classList.remove('hidden'); document.getElementById('confirm-yes').onclick = () => { m.classList.add('hidden'); res(true); }; document.getElementById('confirm-no').onclick = () => { m.classList.add('hidden'); res(false); }; }); },
@@ -249,92 +244,54 @@
       async addFriend(targetUid) { const myPath = `friends/${this.u.uid}/${targetUid}`, theirPath = `friends/${targetUid}/${this.u.uid}`; const snap = await get(ref(db, myPath)), status = snap.val(); if (!status) { await set(ref(db, myPath), 'pending_out'); await set(ref(db, theirPath), 'pending_in'); this.notify(window.t('sent')); } else if (status === 'pending_in') { await set(ref(db, myPath), 'friends'); await set(ref(db, theirPath), 'friends'); this.notify(window.t('accept')); } document.getElementById('mini-modal').classList.add('hidden'); },
       async removeFriend(targetUid) { if(await this.ask(window.t('friend_rem_q'))) { await remove(ref(db, `friends/${this.u.uid}/${targetUid}`)); await remove(ref(db, `friends/${targetUid}/${this.u.uid}`)); this.notify(window.t('link_removed')); document.getElementById('mini-modal').classList.add('hidden'); } },
 
-      async startRecording() { try { if (location.protocol !== 'https:' && location.hostname !== 'localhost') { this.notify("HTTPS REQUIRED FOR MIC", "err"); return; } const stream = await navigator.mediaDevices.getUserMedia({ audio: true }); mediaRecorder = new MediaRecorder(stream); audioChunks = []; mediaRecorder.ondataavailable = (e) => audioChunks.push(e.data); mediaRecorder.onstop = () => this.sendVoice(); mediaRecorder.start(); document.getElementById('voice-btn').classList.add('bg-red-600', 'animate-pulse'); } catch (err) { console.error(err); this.notify("MIC ERROR: " + err.message, "err"); } },
-      stopRecording() { if (mediaRecorder && mediaRecorder.state !== "inactive") { mediaRecorder.stop(); document.getElementById('voice-btn').classList.remove('bg-red-600', 'animate-pulse'); } },
-      async sendVoice() { if (audioChunks.length === 0) return; const blob = new Blob(audioChunks, { type: 'audio/webm' }); const reader = new FileReader(); reader.onload = async (e) => { await push(ref(db, `direct_messages/${currentDmId}`), { uid: this.u.uid, msg: e.target.result, type: 'audio', ts: Date.now() }); }; reader.readAsDataURL(blob); },
+      // Voice recording for DM
+      async startRecording() { try { if (location.protocol !== 'https:' && location.hostname !== 'localhost') { this.notify("HTTPS REQUIRED FOR MIC", "err"); return; } const stream = await navigator.mediaDevices.getUserMedia({ audio: true }); this.mediaRecorder = new MediaRecorder(stream); this.audioChunks = []; this.mediaRecorder.ondataavailable = (e) => this.audioChunks.push(e.data); this.mediaRecorder.onstop = () => this.sendVoice(); this.mediaRecorder.start(); document.getElementById('voice-btn').classList.add('bg-red-600', 'animate-pulse'); } catch (err) { console.error(err); this.notify("MIC ERROR: " + err.message, "err"); } },
+      stopRecording() { if (this.mediaRecorder && this.mediaRecorder.state !== "inactive") { this.mediaRecorder.stop(); document.getElementById('voice-btn').classList.remove('bg-red-600', 'animate-pulse'); } },
+      async sendVoice() { if (this.audioChunks.length === 0) return; const blob = new Blob(this.audioChunks, { type: 'audio/webm' }); const reader = new FileReader(); reader.onload = async (e) => { await push(ref(db, `direct_messages/${currentDmId}`), { uid: this.u.uid, msg: e.target.result, type: 'audio', ts: Date.now() }); }; reader.readAsDataURL(blob); },
+      
+      // Voice for MOD chat
+      async startModRecording() { try { const stream = await navigator.mediaDevices.getUserMedia({ audio: true }); this.modMediaRecorder = new MediaRecorder(stream); this.modAudioChunks = []; this.modMediaRecorder.ondataavailable = (e) => this.modAudioChunks.push(e.data); this.modMediaRecorder.onstop = () => this.sendModVoice(); this.modMediaRecorder.start(); document.getElementById('mod-voice-btn').classList.add('bg-red-600', 'animate-pulse'); } catch (err) { this.notify("MIC ERROR", "err"); } },
+      stopModRecording() { if (this.modMediaRecorder && this.modMediaRecorder.state !== "inactive") { this.modMediaRecorder.stop(); document.getElementById('mod-voice-btn').classList.remove('bg-red-600', 'animate-pulse'); } },
+      async sendModVoice() { if (this.modAudioChunks.length === 0) return; const blob = new Blob(this.modAudioChunks, { type: 'audio/webm' }); const reader = new FileReader(); reader.onload = async (e) => { await push(ref(db, 'mod_chat'), { uid: this.u.uid, name: this.userData.name, msg: e.target.result, type: 'audio', timestamp: Date.now() }); }; reader.readAsDataURL(blob); },
 
-      stopAllAudio() { if (this.currentAudioId) { const prevAudio = document.getElementById(this.currentAudioId); if (prevAudio) { prevAudio.pause(); prevAudio.currentTime = 0; } if (this.audioWaveInterval) clearInterval(this.audioWaveInterval); this.currentAudioId = null; } document.querySelectorAll('.voice-play-btn svg').forEach(svg => { if (svg) svg.innerHTML = '<polygon points="5 3 19 12 5 21 5 3" fill="white"/>'; }); },
-      toggleAudio(audioId, src) { const audio = document.getElementById(audioId); const playBtn = document.getElementById(`playBtn_${audioId}`); if (!audio) return; if (this.currentAudioId === audioId && !audio.paused) { audio.pause(); this.stopAllAudio(); return; } this.stopAllAudio(); if (!audio.src || audio.src !== src) { audio.src = src; audio.load(); } audio.play(); this.currentAudioId = audioId; const svg = playBtn?.querySelector('svg'); if (svg) svg.innerHTML = '<rect x="6" y="4" width="4" height="16" fill="white"/><rect x="14" y="4" width="4" height="16" fill="white"/>'; this.animateWaveform(audioId); this.updateAudioProgress(audioId); audio.onended = () => { this.stopAllAudio(); const endSvg = document.getElementById(`playBtn_${audioId}`)?.querySelector('svg'); if (endSvg) endSvg.innerHTML = '<polygon points="5 3 19 12 5 21 5 3" fill="white"/>'; }; },
-      animateWaveform(audioId) { const waveform = document.getElementById(`waveform_${audioId}`); if (!waveform) return; const bars = waveform.querySelectorAll('.wave-bar'); if (this.audioWaveInterval) clearInterval(this.audioWaveInterval); this.audioWaveInterval = setInterval(() => { if (this.currentAudioId !== audioId) { clearInterval(this.audioWaveInterval); return; } bars.forEach(bar => { bar.style.height = `${Math.random() * 24 + 6}px`; }); }, 80); },
-      updateAudioProgress(audioId) { const audio = document.getElementById(audioId); const progressFill = document.getElementById(`progressFill_${audioId}`); const currentTimeSpan = document.getElementById(`currentTime_${audioId}`); const durationSpan = document.getElementById(`duration_${audioId}`); if (!audio) return; const setDuration = () => { if (isNaN(audio.duration)) return; const m = Math.floor(audio.duration / 60), s = Math.floor(audio.duration % 60); if (durationSpan) durationSpan.innerText = `${m}:${s.toString().padStart(2, '0')}`; }; if (audio.readyState >= 1) setDuration(); else audio.addEventListener('loadedmetadata', setDuration); const update = setInterval(() => { if (this.currentAudioId !== audioId) { clearInterval(update); return; } if (audio.duration && !isNaN(audio.duration)) { const percent = (audio.currentTime / audio.duration) * 100; if (progressFill) progressFill.style.width = `${percent}%`; const m = Math.floor(audio.currentTime / 60), s = Math.floor(audio.currentTime % 60); if (currentTimeSpan) currentTimeSpan.innerText = `${m}:${s.toString().padStart(2, '0')}`; } }, 100); },
+      stopAllAudio() { if (this.currentAudioId) { const prevAudio = document.getElementById(this.currentAudioId); if (prevAudio) { prevAudio.pause(); prevAudio.currentTime = 0; } if (this.audioWaveInterval) clearInterval(this.audioWaveInterval); this.currentAudioId = null; } if (this.currentModAudioId) { const prevAudio = document.getElementById(this.currentModAudioId); if (prevAudio) { prevAudio.pause(); prevAudio.currentTime = 0; } if (this.modAudioWaveInterval) clearInterval(this.modAudioWaveInterval); this.currentModAudioId = null; } document.querySelectorAll('.voice-play-btn svg').forEach(svg => { if (svg) svg.innerHTML = '<polygon points="5 3 19 12 5 21 5 3" fill="white"/>'; }); },
+      toggleAudio(audioId, src, isMod = false) { const audio = document.getElementById(audioId); const playBtn = document.getElementById(`playBtn_${audioId}`); if (!audio) return; if ((isMod && this.currentModAudioId === audioId && !audio.paused) || (!isMod && this.currentAudioId === audioId && !audio.paused)) { audio.pause(); this.stopAllAudio(); return; } this.stopAllAudio(); if (!audio.src || audio.src !== src) { audio.src = src; audio.load(); } audio.play(); if (isMod) this.currentModAudioId = audioId; else this.currentAudioId = audioId; const svg = playBtn?.querySelector('svg'); if (svg) svg.innerHTML = '<rect x="6" y="4" width="4" height="16" fill="white"/><rect x="14" y="4" width="4" height="16" fill="white"/>'; this.animateWaveform(audioId, isMod); this.updateAudioProgress(audioId, isMod); audio.onended = () => { this.stopAllAudio(); const endSvg = document.getElementById(`playBtn_${audioId}`)?.querySelector('svg'); if (endSvg) endSvg.innerHTML = '<polygon points="5 3 19 12 5 21 5 3" fill="white"/>'; }; },
+      animateWaveform(audioId, isMod) { const waveform = document.getElementById(`waveform_${audioId}`); if (!waveform) return; const bars = waveform.querySelectorAll('.wave-bar'); const interval = setInterval(() => { if ((isMod && this.currentModAudioId !== audioId) || (!isMod && this.currentAudioId !== audioId)) { clearInterval(interval); return; } bars.forEach(bar => { bar.style.height = `${Math.random() * 24 + 6}px`; }); }, 80); if (isMod) this.modAudioWaveInterval = interval; else this.audioWaveInterval = interval; },
+      updateAudioProgress(audioId, isMod) { const audio = document.getElementById(audioId); const progressFill = document.getElementById(`progressFill_${audioId}`); const currentTimeSpan = document.getElementById(`currentTime_${audioId}`); const durationSpan = document.getElementById(`duration_${audioId}`); if (!audio) return; const setDuration = () => { if (isNaN(audio.duration)) return; const m = Math.floor(audio.duration / 60), s = Math.floor(audio.duration % 60); if (durationSpan) durationSpan.innerText = `${m}:${s.toString().padStart(2, '0')}`; }; if (audio.readyState >= 1) setDuration(); else audio.addEventListener('loadedmetadata', setDuration); const update = setInterval(() => { if ((isMod && this.currentModAudioId !== audioId) || (!isMod && this.currentAudioId !== audioId)) { clearInterval(update); return; } if (audio.duration && !isNaN(audio.duration)) { const percent = (audio.currentTime / audio.duration) * 100; if (progressFill) progressFill.style.width = `${percent}%`; const m = Math.floor(audio.currentTime / 60), s = Math.floor(audio.currentTime % 60); if (currentTimeSpan) currentTimeSpan.innerText = `${m}:${s.toString().padStart(2, '0')}`; } }, 100); },
       seekAudio(audioId, event) { const audio = document.getElementById(audioId); if (!audio || !audio.duration) return; const rect = event.currentTarget.getBoundingClientRect(); audio.currentTime = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width)) * audio.duration; },
 
-      openEditModal(msgId, currentText) {
-        pendingEditMsgId = msgId;
-        document.getElementById('edit-text-input').value = currentText;
-        document.getElementById('edit-modal').classList.remove('hidden');
-      },
-      async saveEditedMessage() {
-        const newText = document.getElementById('edit-text-input').value.trim();
-        if (newText) {
-          await update(ref(db, `direct_messages/${currentDmId}/${pendingEditMsgId}`), { msg: newText });
-          this.notify(window.t('name_updated'));
-        }
-        document.getElementById('edit-modal').classList.add('hidden');
-        pendingEditMsgId = null;
-      },
-      async deleteMessage(msgId) {
-        if(await this.ask(window.t('del_msg'))) {
-          await remove(ref(db, `direct_messages/${currentDmId}/${msgId}`));
-          this.notify(window.t('link_removed'));
-        }
-      },
-
-      openDm(targetUid, targetName) {
-        const ids = [this.u.uid, targetUid].sort();
-        currentDmId = ids.join("_");
-        document.getElementById('dm-target-name').innerText = targetName;
-        document.getElementById('dm-modal').classList.remove('hidden');
-        document.getElementById('mini-modal').classList.add('hidden');
-        const dmRef = ref(db, `direct_messages/${currentDmId}`);
-        off(dmRef);
-        onValue(query(dmRef, limitToLast(30)), (s) => {
-          const b = document.getElementById('dm-box');
-          b.innerHTML = '';
-          s.forEach(m => {
-            const v = m.val(), isMe = v.uid === this.u.uid, mid = m.key;
-            let content = '';
-            if (v.type === 'image') {
-              content = `<img src="${v.msg}" class="max-w-[200px] rounded-2xl border border-white/10">`;
-            } else if (v.type === 'video') {
-              content = `<div class="bg-black/20 p-2 rounded-2xl"><video src="${v.msg}" controls class="max-w-[240px] rounded-xl"></video></div>`;
-            } else if (v.type === 'audio') {
-              const audioId = 'audio_' + mid;
-              const barsHtml = Array(20).fill(0).map(() => `<div class="wave-bar" style="height: ${Math.random() * 20 + 6}px"></div>`).join('');
-              content = `<div class="voice-message"><div style="display: flex; align-items: center; gap: 12px;"><button class="voice-play-btn" id="playBtn_${audioId}" onclick="core.toggleAudio('${audioId}', \`${v.msg}\`)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><polygon points="5 3 19 12 5 21 5 3" fill="white"/></svg></button><div style="flex: 1;"><div class="voice-waveform" id="waveform_${audioId}">${barsHtml}</div><div class="voice-progress-container"><div class="voice-progress-track" id="progressBar_${audioId}" onclick="core.seekAudio('${audioId}', event)"><div class="voice-progress-fill" id="progressFill_${audioId}" style="width: 0%"></div></div><div class="voice-time"><span id="currentTime_${audioId}">0:00</span><span id="duration_${audioId}">0:00</span></div></div></div></div><audio id="${audioId}" style="display: none;"></audio></div>`;
-            } else if (v.type === 'file') {
-              content = `<div class="bg-black/20 p-4 rounded-xl flex items-center gap-4"><div class="w-10 h-10 bg-blue-600 rounded flex items-center justify-center text-[8px]">DOC</div><div class="flex-1"><div class="text-[7px] opacity-40 uppercase mb-2">${v.fileName || 'FILE'}</div><button onclick="core.downloadFile('${v.msg}', '${v.fileName}')" class="text-blue-500 font-black text-[9px] uppercase">DOWNLOAD</button></div></div>`;
-            } else {
-              content = v.msg;
-            }
-            
-            const actionButtons = isMe ? `
-              <div class="flex gap-2 mt-1 justify-end">
-                ${v.type === 'text' ? `<button onclick="core.openEditModal('${mid}', '${v.msg.replace(/'/g, "\\'")}')" class="opacity-50 hover:opacity-100 transition p-1.5 rounded-lg hover:bg-white/10" title="Edit">${editIcon}</button>` : ''}
-                <button onclick="core.deleteMessage('${mid}')" class="opacity-50 hover:opacity-100 transition p-1.5 rounded-lg hover:bg-white/10" title="Delete">${deleteIcon}</button>
-              </div>
-            ` : '';
-            
-            b.innerHTML += `
-              <div class="flex flex-col ${isMe ? 'items-end' : 'items-start'} mb-4 animate-slide">
-                <div class="px-4 py-3 rounded-2xl text-[10px] font-bold ${isMe ? 'bg-blue-600 text-white rounded-tr-none' : 'bg-white/5 text-white/70 rounded-tl-none'}">
-                  ${content}
-                </div>
-                ${actionButtons}
-              </div>
-            `;
-          });
-          b.scrollTop = b.scrollHeight;
-        });
-      },
-      async sendDm() { const i = document.getElementById('dm-in'); if(!i.value.trim() || !currentDmId) return; await push(ref(db, `direct_messages/${currentDmId}`), { uid: this.u.uid, msg: i.value.trim(), type: 'text', ts: Date.now() }); i.value = ''; },
-      async sendDmFile(e) { const file = e.target.files[0]; if (!file || !currentDmId) return; const reader = new FileReader(); reader.onload = async (ev) => { let type = 'file'; if (file.type.startsWith('image/')) type = 'image'; else if (file.type.startsWith('video/')) type = 'video'; else if (file.type.startsWith('audio/')) type = 'audio'; await push(ref(db, `direct_messages/${currentDmId}`), { uid: this.u.uid, msg: ev.target.result, type: type, fileName: file.name, ts: Date.now() }); }; reader.readAsDataURL(file); },
+      openEditModal(msgId, currentText) { pendingEditMsgId = msgId; document.getElementById('edit-text-input').value = currentText; document.getElementById('edit-modal').classList.remove('hidden'); },
+      async saveEditedMessage() { const newText = document.getElementById('edit-text-input').value.trim(); if (newText) { await update(ref(db, `direct_messages/${currentDmId}/${pendingEditMsgId}`), { msg: newText }); this.notify(window.t('name_updated')); } document.getElementById('edit-modal').classList.add('hidden'); pendingEditMsgId = null; },
+      async deleteMessage(msgId) { if(await this.ask(window.t('del_msg'))) { await remove(ref(db, `direct_messages/${currentDmId}/${msgId}`)); this.notify(window.t('link_removed')); } },
+      
+      // Mod chat edit/delete
+      openModEditModal(msgId, currentText) { pendingEditModMsgId = msgId; document.getElementById('edit-mod-text-input').value = currentText; document.getElementById('edit-mod-modal').classList.remove('hidden'); },
+      async saveEditedModMessage() { const newText = document.getElementById('edit-mod-text-input').value.trim(); if (newText) { await update(ref(db, `mod_chat/${pendingEditModMsgId}`), { msg: newText, edited: true }); this.notify(window.t('name_updated')); } document.getElementById('edit-mod-modal').classList.add('hidden'); pendingEditModMsgId = null; },
+      async deleteModMessage(msgId) { if(await this.ask(window.t('del_msg'))) { await remove(ref(db, `mod_chat/${msgId}`)); this.notify(window.t('link_removed')); } },
+      
+      async sendModFile(e) { const file = e.target.files[0]; if (!file) return; const reader = new FileReader(); reader.onload = async (ev) => { let type = 'file'; if (file.type.startsWith('image/')) type = 'image'; else if (file.type.startsWith('video/')) type = 'video'; else if (file.type.startsWith('audio/')) type = 'audio'; await push(ref(db, 'mod_chat'), { uid: this.u.uid, name: this.userData.name, msg: ev.target.result, type: type, fileName: file.name, timestamp: Date.now() }); }; reader.readAsDataURL(file); },
+      
       downloadFile(base64, name) { const a = document.createElement('a'); a.href = base64; a.download = name || "file"; a.click(); },
 
       openReportModal(targetUid, targetName) {
         pendingReportTarget = { uid: targetUid, name: targetName };
         document.getElementById('report-reason').value = '';
+        document.getElementById('report-screenshot-preview').style.backgroundImage = 'none';
+        document.getElementById('report-screenshot-preview').classList.add('hidden');
+        document.getElementById('report-screenshot-data').value = '';
         document.getElementById('report-modal').classList.remove('hidden');
+      },
+      async attachReportScreenshot(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+          document.getElementById('report-screenshot-data').value = ev.target.result;
+          const preview = document.getElementById('report-screenshot-preview');
+          preview.style.backgroundImage = `url(${ev.target.result})`;
+          preview.classList.remove('hidden');
+        };
+        reader.readAsDataURL(file);
       },
       async submitReport() {
         const reason = document.getElementById('report-reason').value.trim();
@@ -343,7 +300,8 @@
           await push(ref(db, 'reports'), {
             reporterUid: this.u.uid, reporterName: this.userData.name,
             reportedUid: pendingReportTarget.uid, reportedName: pendingReportTarget.name,
-            reason: reason, timestamp: Date.now()
+            reason: reason, screenshot: document.getElementById('report-screenshot-data').value || null,
+            timestamp: Date.now()
           });
           this.notify('REPORT SENT TO MODERATORS');
           document.getElementById('report-modal').classList.add('hidden');
@@ -366,392 +324,83 @@
 
       async openSecurityLink(url) { document.getElementById('sec-url-display').innerText = url; const modal = document.getElementById('security-modal'); modal.classList.remove('hidden'); document.getElementById('sec-connect').onclick = () => { window.open(url, '_blank'); modal.classList.add('hidden'); }; },
 
-      // ========== МОДЕРАТОРСКАЯ ПАНЕЛЬ ==========
+      openDm(targetUid, targetName) {
+        const ids = [this.u.uid, targetUid].sort();
+        currentDmId = ids.join("_");
+        document.getElementById('dm-target-name').innerText = targetName;
+        document.getElementById('dm-modal').classList.remove('hidden');
+        document.getElementById('mini-modal').classList.add('hidden');
+        const dmRef = ref(db, `direct_messages/${currentDmId}`);
+        off(dmRef);
+        onValue(query(dmRef, limitToLast(30)), (s) => {
+          const b = document.getElementById('dm-box');
+          b.innerHTML = '';
+          s.forEach(m => {
+            const v = m.val(), isMe = v.uid === this.u.uid, mid = m.key;
+            let content = '';
+            if (v.type === 'image') {
+              content = `<img src="${v.msg}" class="max-w-[200px] rounded-2xl border border-white/10">`;
+            } else if (v.type === 'video') {
+              content = `<div class="bg-black/20 p-2 rounded-2xl"><video src="${v.msg}" controls class="max-w-[240px] rounded-xl"></video></div>`;
+            } else if (v.type === 'audio') {
+              const audioId = 'audio_' + mid;
+              const barsHtml = Array(20).fill(0).map(() => `<div class="wave-bar" style="height: ${Math.random() * 20 + 6}px"></div>`).join('');
+              content = `<div class="voice-message"><div style="display: flex; align-items: center; gap: 12px;"><button class="voice-play-btn" id="playBtn_${audioId}" onclick="core.toggleAudio('${audioId}', \`${v.msg}\`, false)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><polygon points="5 3 19 12 5 21 5 3" fill="white"/></svg></button><div style="flex: 1;"><div class="voice-waveform" id="waveform_${audioId}">${barsHtml}</div><div class="voice-progress-container"><div class="voice-progress-track" id="progressBar_${audioId}" onclick="core.seekAudio('${audioId}', event)"><div class="voice-progress-fill" id="progressFill_${audioId}" style="width: 0%"></div></div><div class="voice-time"><span id="currentTime_${audioId}">0:00</span><span id="duration_${audioId}">0:00</span></div></div></div></div><audio id="${audioId}" style="display: none;"></audio></div>`;
+            } else if (v.type === 'file') {
+              content = `<div class="bg-black/20 p-4 rounded-xl flex items-center gap-4"><div class="w-10 h-10 bg-blue-600 rounded flex items-center justify-center text-[8px]">DOC</div><div class="flex-1"><div class="text-[7px] opacity-40 uppercase mb-2">${v.fileName || 'FILE'}</div><button onclick="core.downloadFile('${v.msg}', '${v.fileName}')" class="text-blue-500 font-black text-[9px] uppercase">DOWNLOAD</button></div></div>`;
+            } else {
+              content = v.msg;
+            }
+            const actionButtons = isMe ? `<div class="flex gap-2 mt-1 justify-end"><button onclick="core.openEditModal('${mid}', '${v.msg.replace(/'/g, "\\'")}')" class="opacity-50 hover:opacity-100 transition p-1.5 rounded-lg hover:bg-white/10">${editIcon}</button><button onclick="core.deleteMessage('${mid}')" class="opacity-50 hover:opacity-100 transition p-1.5 rounded-lg hover:bg-white/10">${deleteIcon}</button></div>` : '';
+            b.innerHTML += `<div class="flex flex-col ${isMe ? 'items-end' : 'items-start'} mb-4 animate-slide"><div class="px-4 py-3 rounded-2xl text-[10px] font-bold ${isMe ? 'bg-blue-600 text-white rounded-tr-none' : 'bg-white/5 text-white/70 rounded-tl-none'}">${content}</div>${actionButtons}</div>`;
+          });
+          b.scrollTop = b.scrollHeight;
+        });
+      },
+      async sendDm() { const i = document.getElementById('dm-in'); if(!i.value.trim() || !currentDmId) return; await push(ref(db, `direct_messages/${currentDmId}`), { uid: this.u.uid, msg: i.value.trim(), type: 'text', ts: Date.now() }); i.value = ''; },
+      async sendDmFile(e) { const file = e.target.files[0]; if (!file || !currentDmId) return; const reader = new FileReader(); reader.onload = async (ev) => { let type = 'file'; if (file.type.startsWith('image/')) type = 'image'; else if (file.type.startsWith('video/')) type = 'video'; else if (file.type.startsWith('audio/')) type = 'audio'; await push(ref(db, `direct_messages/${currentDmId}`), { uid: this.u.uid, msg: ev.target.result, type: type, fileName: file.name, ts: Date.now() }); }; reader.readAsDataURL(file); },
+
+      // MOD PANEL
       modActiveTab: 'users',
-      
       switchModTab(tabId) {
         this.modActiveTab = tabId;
         document.querySelectorAll('.mod-tab-content').forEach(c => c.classList.add('hidden'));
         document.getElementById(`mod-${tabId}`).classList.remove('hidden');
-        
-        document.querySelectorAll('.mod-tab').forEach(btn => {
-          btn.classList.remove('active', 'text-blue-500', 'border-blue-500');
-          btn.classList.add('text-white/40', 'border-transparent');
-        });
-        
+        document.querySelectorAll('.mod-tab').forEach(btn => { btn.classList.remove('active', 'text-blue-500', 'border-blue-500'); btn.classList.add('text-white/40', 'border-transparent'); });
         const activeBtn = document.querySelector(`.mod-tab[data-tab="${tabId}"]`);
-        if (activeBtn) {
-          activeBtn.classList.add('active', 'text-blue-500', 'border-blue-500');
-          activeBtn.classList.remove('text-white/40', 'border-transparent');
-        }
-        
+        if (activeBtn) { activeBtn.classList.add('active', 'text-blue-500', 'border-blue-500'); activeBtn.classList.remove('text-white/40', 'border-transparent'); }
         if (tabId === 'users') this.renderModUsers();
         if (tabId === 'tournaments') this.renderModTournaments();
         if (tabId === 'reports') this.renderModReports();
         if (tabId === 'logs') this.renderModLogs();
         if (tabId === 'chat') this.initModChat();
       },
-      
-      filterModUsers() {
-        const searchTerm = document.getElementById('mod-user-search').value.toLowerCase();
-        document.querySelectorAll('#mod-users-list .mod-user-item').forEach(item => {
-          const name = item.dataset.name?.toLowerCase() || '';
-          const uid = item.dataset.uid?.toLowerCase() || '';
-          item.classList.toggle('hidden', !(name.includes(searchTerm) || uid.includes(searchTerm)));
-        });
-      },
-      
-      async renderModUsers() {
-        const container = document.getElementById('mod-users-list');
-        if (!container) return;
-        const usersSnap = await get(ref(db, 'users'));
-        const users = usersSnap.val() || {};
-        container.innerHTML = '';
-        if (Object.keys(users).length === 0) {
-          container.innerHTML = `<div class="text-center py-10 text-[8px] opacity-30 uppercase">NO USERS</div>`;
-          return;
-        }
-        for (const [uid, data] of Object.entries(users)) {
-          const style = this.getUserStyle(data);
-          const isOnline = this.isUserOnline(uid);
-          const canModerate = !data.isMaker;
-          container.innerHTML += `<div class="mod-user-item bg-white/5 p-5 rounded-2xl border border-white/10 mb-3 hover:bg-white/10 transition-all" data-name="${(data.name || '').toLowerCase()}" data-uid="${uid.toLowerCase()}">
-            <div class="flex justify-between items-start flex-wrap gap-3">
-              <div class="flex items-center gap-3 cursor-pointer" onclick="core.showMini('${uid}')">
-                <div class="relative">
-                  <div class="w-12 h-12 rounded-xl bg-cover bg-center bg-zinc-800" style="background-image:url(${data.avatar || ''})"></div>
-                  <div class="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border border-black ${isOnline ? 'bg-green-500' : 'bg-gray-500'}"></div>
-                </div>
-                <div>
-                  <div class="text-sm font-black uppercase ${style.class}">${data.name || 'UNKNOWN'}</div>
-                  <div class="text-[8px] opacity-30 uppercase">ID: ${uid.substring(0,8)}... | EXR: ${data.exr || 0} | ${data.isMaker ? 'MAKER' : data.isAdmin && data.isPro ? 'ELITE' : data.isAdmin ? 'ADMIN' : data.isPro ? 'PRO' : 'PLAYER'}</div>
-                </div>
-              </div>
-              <div class="flex gap-2 items-center">
-                <button onclick="core.copyId('${uid}')" class="px-3 py-2 rounded-xl bg-white/10 text-white/60 text-[8px] font-black uppercase hover:bg-blue-600/30">${window.t('copy_id')}</button>
-                ${canModerate ? `<div class="flex flex-wrap gap-2">
-                  <button onclick="core.modBanUser('${uid}', '${data.name || uid}', ${data.isBan || false})" class="px-4 py-2 rounded-xl text-[9px] font-black uppercase ${data.isBan ? 'bg-green-600/20 text-green-500' : 'bg-red-600/20 text-red-500'}">${data.isBan ? window.t('unban') : window.t('ban')}</button>
-                  ${!data.isAdmin ? `<button onclick="core.modMakeAdmin('${uid}', '${data.name || uid}')" class="px-4 py-2 rounded-xl bg-purple-600/20 text-purple-400 text-[9px] font-black uppercase">${window.t('make_admin')}</button>` : `<button onclick="core.modRemoveAdmin('${uid}', '${data.name || uid}')" class="px-4 py-2 rounded-xl bg-orange-600/20 text-orange-400 text-[9px] font-black uppercase">${window.t('remove_admin')}</button>`}
-                  ${!data.isPro ? `<button onclick="core.modMakePro('${uid}', '${data.name || uid}')" class="px-4 py-2 rounded-xl bg-yellow-600/20 text-yellow-500 text-[9px] font-black uppercase">${window.t('make_pro')}</button>` : `<button onclick="core.modRemovePro('${uid}', '${data.name || uid}')" class="px-4 py-2 rounded-xl bg-orange-600/20 text-orange-400 text-[9px] font-black uppercase">${window.t('remove_pro')}</button>`}
-                </div>` : '<div class="text-[8px] text-purple-400 font-black">MAKER</div>'}
-              </div>
-            </div>
-          </div>`;
-        }
-      },
-      
+      filterModUsers() { const searchTerm = document.getElementById('mod-user-search').value.toLowerCase(); document.querySelectorAll('#mod-users-list .mod-user-item').forEach(item => { const name = item.dataset.name?.toLowerCase() || ''; const uid = item.dataset.uid?.toLowerCase() || ''; item.classList.toggle('hidden', !(name.includes(searchTerm) || uid.includes(searchTerm))); }); },
+      async renderModUsers() { const container = document.getElementById('mod-users-list'); if (!container) return; const usersSnap = await get(ref(db, 'users')); const users = usersSnap.val() || {}; container.innerHTML = ''; if (Object.keys(users).length === 0) { container.innerHTML = `<div class="text-center py-10 text-[8px] opacity-30 uppercase">NO USERS</div>`; return; } for (const [uid, data] of Object.entries(users)) { const style = this.getUserStyle(data); const isOnline = this.isUserOnline(uid); const canModerate = !data.isMaker; container.innerHTML += `<div class="mod-user-item bg-white/5 p-5 rounded-2xl border border-white/10 mb-3 hover:bg-white/10 transition-all" data-name="${(data.name || '').toLowerCase()}" data-uid="${uid.toLowerCase()}"><div class="flex justify-between items-start flex-wrap gap-3"><div class="flex items-center gap-3 cursor-pointer" onclick="core.showMini('${uid}')"><div class="relative"><div class="w-12 h-12 rounded-xl bg-cover bg-center bg-zinc-800" style="background-image:url(${data.avatar || ''})"></div><div class="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border border-black ${isOnline ? 'bg-green-500' : 'bg-gray-500'}"></div></div><div><div class="text-sm font-black uppercase ${style.class}">${data.name || 'UNKNOWN'}</div><div class="text-[8px] opacity-30 uppercase">ID: ${uid.substring(0,8)}... | EXR: ${data.exr || 0}</div></div></div><div class="flex gap-2 items-center"><button onclick="core.copyId('${uid}')" class="px-3 py-2 rounded-xl bg-white/10 text-white/60 text-[8px] font-black uppercase hover:bg-blue-600/30">${window.t('copy_id')}</button>${canModerate ? `<div class="flex flex-wrap gap-2"><button onclick="core.modBanUser('${uid}', '${data.name || uid}', ${data.isBan || false})" class="px-4 py-2 rounded-xl text-[9px] font-black uppercase ${data.isBan ? 'bg-green-600/20 text-green-500' : 'bg-red-600/20 text-red-500'}">${data.isBan ? window.t('unban') : window.t('ban')}</button>${!data.isAdmin ? `<button onclick="core.modMakeAdmin('${uid}', '${data.name || uid}')" class="px-4 py-2 rounded-xl bg-purple-600/20 text-purple-400 text-[9px] font-black uppercase">${window.t('make_admin')}</button>` : `<button onclick="core.modRemoveAdmin('${uid}', '${data.name || uid}')" class="px-4 py-2 rounded-xl bg-orange-600/20 text-orange-400 text-[9px] font-black uppercase">${window.t('remove_admin')}</button>`}${!data.isPro ? `<button onclick="core.modMakePro('${uid}', '${data.name || uid}')" class="px-4 py-2 rounded-xl bg-yellow-600/20 text-yellow-500 text-[9px] font-black uppercase">${window.t('make_pro')}</button>` : `<button onclick="core.modRemovePro('${uid}', '${data.name || uid}')" class="px-4 py-2 rounded-xl bg-orange-600/20 text-orange-400 text-[9px] font-black uppercase">${window.t('remove_pro')}</button>`}</div>` : '<div class="text-[8px] text-purple-400 font-black">MAKER</div>'}</div></div></div>`; } },
       async modBanUser(uid, name, isBanned) { if(await this.ask(isBanned ? window.t('unban_q') : window.t('ban_q'))) { await update(ref(db, `users/${uid}`), { isBan: !isBanned }); addModLog(isBanned ? 'UNBAN' : 'BAN', uid, name); this.notify(window.t('status_updated')); this.renderModUsers(); } },
       async modMakeAdmin(uid, name) { if(await this.ask(`MAKE ${name} ADMIN?`)) { await update(ref(db, `users/${uid}`), { isAdmin: true }); addModLog('MAKE_ADMIN', uid, name); this.notify(`${name} IS NOW ADMIN`); this.renderModUsers(); } },
       async modRemoveAdmin(uid, name) { if(await this.ask(`REMOVE ADMIN FROM ${name}?`)) { await update(ref(db, `users/${uid}`), { isAdmin: false }); addModLog('REMOVE_ADMIN', uid, name); this.notify(`${name} IS NO LONGER ADMIN`); this.renderModUsers(); } },
       async modMakePro(uid, name) { if(await this.ask(`MAKE ${name} PRO? (expires in 30 days)`)) { await update(ref(db, `users/${uid}`), { isPro: true, proGrantedAt: Date.now() }); addModLog('MAKE_PRO', uid, name); this.notify(`${name} IS NOW PRO PLAYER (30 days)`); this.renderModUsers(); } },
       async modRemovePro(uid, name) { if(await this.ask(`REMOVE PRO FROM ${name}?`)) { await update(ref(db, `users/${uid}`), { isPro: false, proGrantedAt: null }); addModLog('REMOVE_PRO', uid, name); this.notify(`${name} PRO REMOVED`); this.renderModUsers(); } },
-      
-      async renderModTournaments() { 
-        const container = document.getElementById('mod-tournaments-list');
-        if (!container) return;
-        const tSnap = await get(ref(db, 'tourneys'));
-        const tours = tSnap.val() || {};
-        container.innerHTML = '';
-        if (Object.keys(tours).length === 0) {
-          container.innerHTML = `<div class="text-center py-10 text-[8px] opacity-30 uppercase">NO TOURNAMENTS</div>`;
-          return;
-        }
-        for (const [tid, data] of Object.entries(tours)) {
-          const alphaCount = data.alpha ? Object.keys(data.alpha).length : 0;
-          const omegaCount = data.omega ? Object.keys(data.omega).length : 0;
-          container.innerHTML += `<div class="bg-white/5 p-5 rounded-2xl border border-white/10 mb-3">
-            <div class="flex justify-between items-start flex-wrap gap-3">
-              <div>
-                <div class="text-lg font-black italic uppercase text-white">${data.name || 'NO NAME'}</div>
-                <div class="text-[8px] opacity-30 mt-1">${data.code || 'NO CODE'} | ${data.format || 'N/A'} | ${alphaCount}+${omegaCount} players</div>
-              </div>
-              <div class="flex gap-2">
-                <button onclick="core.openLobby('${tid}')" class="px-4 py-2 rounded-xl bg-blue-600/20 text-blue-400 text-[9px] font-black uppercase">VIEW</button>
-                <button onclick="core.modForceFinish('${tid}', '${data.name || 'TOURNAMENT'}')" class="px-4 py-2 rounded-xl bg-red-600/20 text-red-500 text-[9px] font-black uppercase">${window.t('force_finish')}</button>
-                <button onclick="core.deleteTourney('${tid}')" class="px-4 py-2 rounded-xl bg-white/10 text-white/40 text-[9px] font-black uppercase">${window.t('delete_event')}</button>
-              </div>
-            </div>
-          </div>`;
-        }
-      },
-      
-      async modForceFinish(tid, name) { 
-        if(await this.ask(`FORCE FINISH ${name}?`)) { 
-          const tSnap = await get(ref(db, `tourneys/${tid}`)); 
-          const t = tSnap.val(); 
-          if (t && t.alpha && t.omega) { 
-            for (const uid of Object.keys(t.alpha)) { 
-              await update(ref(db, `users/${uid}`), { exr: increment(25), wins: increment(1) }); 
-            } 
-            for (const uid of Object.keys(t.omega)) { 
-              await update(ref(db, `users/${uid}`), { exr: increment(-15), losses: increment(1) }); 
-            } 
-          } 
-          await remove(ref(db, `tourneys/${tid}`)); 
-          await remove(ref(db, `chats/${tid}`)); 
-          addModLog('FORCE_FINISH_TOURNAMENT', null, null, name); 
-          this.notify(`TOURNAMENT ${name} FORCE FINISHED`); 
-          this.renderModTournaments(); 
-          this.loadList(); 
-        } 
-      },
-      
-      async renderModReports() { 
-        const container = document.getElementById('mod-reports-list');
-        if (!container) return;
-        const rSnap = await get(ref(db, 'reports'));
-        const reports = rSnap.val() || {};
-        container.innerHTML = '';
-        if (Object.keys(reports).length === 0) { 
-          container.innerHTML = `<div class="text-center py-10 text-[8px] opacity-30 uppercase">${window.t('no_reports')}</div>`; 
-          return; 
-        }
-        for (const [rid, data] of Object.entries(reports)) {
-          container.innerHTML += `<div class="bg-white/5 p-5 rounded-2xl border border-white/10 mb-3">
-            <div class="flex justify-between items-start flex-wrap gap-3">
-              <div class="flex-1">
-                <div class="text-[10px] font-black uppercase text-red-400">${data.reporterName || 'UNKNOWN'} → ${data.reportedName || 'UNKNOWN'}</div>
-                <div class="text-[9px] opacity-60 mt-2">${data.reason || 'NO REASON'}</div>
-                <div class="text-[7px] opacity-20 mt-1">${data.timestamp ? new Date(data.timestamp).toLocaleString() : 'NO DATE'}</div>
-              </div>
-              <div class="flex gap-2">
-                <button onclick="core.modResolveReport('${rid}', '${data.reportedUid || ''}', '${data.reportedName || ''}')" class="px-4 py-2 rounded-xl bg-green-600/20 text-green-500 text-[9px] font-black uppercase">BAN & RESOLVE</button>
-                <button onclick="core.modDismissReport('${rid}')" class="px-4 py-2 rounded-xl bg-white/10 text-white/40 text-[9px] font-black uppercase">DISMISS</button>
-              </div>
-            </div>
-          </div>`;
-        }
-      },
-      
-      async modResolveReport(rid, reportedUid, reportedName) { 
-        if (reportedUid) {
-          await update(ref(db, `users/${reportedUid}`), { isBan: true }); 
-        }
-        await remove(ref(db, `reports/${rid}`)); 
-        addModLog('BAN_FROM_REPORT', reportedUid, reportedName); 
-        this.notify(`${reportedName || 'User'} BANNED FROM REPORT`); 
-        this.renderModReports(); 
-        this.renderModUsers(); 
-      },
-      
-      async modDismissReport(rid) { 
-        await remove(ref(db, `reports/${rid}`)); 
-        this.notify('REPORT DISMISSED'); 
-        this.renderModReports(); 
-      },
-      
-      renderModLogs() { 
-        const container = document.getElementById('mod-logs-list');
-        if (!container) return;
-        const logsRef = query(ref(db, 'mod_logs'), limitToLast(100));
-        onValue(logsRef, (snap) => {
-          const logs = snap.val() || {};
-          container.innerHTML = '';
-          if (Object.keys(logs).length === 0) {
-            container.innerHTML = `<div class="text-center py-10 text-[8px] opacity-30 uppercase">NO LOGS</div>`;
-            return;
-          }
-          Object.entries(logs).reverse().forEach(([lid, data]) => {
-            container.innerHTML += `<div class="bg-white/5 p-4 rounded-xl border border-white/5 mb-2">
-              <div class="flex justify-between items-start text-[9px] flex-wrap gap-2">
-                <span class="text-blue-400 font-black">${data.adminName || 'SYSTEM'}</span>
-                <span class="text-white/60">${data.action || 'UNKNOWN'}</span>
-                <span class="text-white/30 text-[8px]">${data.targetName || data.details || '-'}</span>
-                <span class="text-white/20 text-[7px]">${data.timestamp ? new Date(data.timestamp).toLocaleString() : 'NO DATE'}</span>
-              </div>
-            </div>`;
-          });
-        });
-      },
-      
-      initModChat() { 
-        const container = document.getElementById('mod-chat-box');
-        if (!container) return;
-        const chatRef = ref(db, 'mod_chat');
-        off(chatRef);
-        onValue(query(chatRef, limitToLast(50)), (snap) => {
-          container.innerHTML = '';
-          snap.forEach(msg => {
-            const v = msg.val();
-            const isMe = v.uid === this.u.uid;
-            container.innerHTML += `<div class="flex flex-col ${isMe ? 'items-end' : 'items-start'} mb-3">
-              <div class="text-[6px] opacity-30 mb-1">${v.name || 'UNKNOWN'}</div>
-              <div class="px-4 py-2 rounded-xl text-[9px] font-black ${isMe ? 'bg-blue-600/30 text-blue-400' : 'bg-white/10 text-white/70'}">${v.msg || ''}</div>
-            </div>`;
-            container.scrollTop = container.scrollHeight;
-          });
-        });
-      },
-      
-      async sendModChat() { 
-        const input = document.getElementById('mod-chat-in'); 
-        if (!input.value.trim()) return; 
-        await push(ref(db, 'mod_chat'), { uid: this.u.uid, name: this.userData.name, msg: input.value.trim(), timestamp: Date.now() }); 
-        input.value = ''; 
-      },
+      async renderModTournaments() { const container = document.getElementById('mod-tournaments-list'); if (!container) return; const tSnap = await get(ref(db, 'tourneys')); const tours = tSnap.val() || {}; container.innerHTML = ''; if (Object.keys(tours).length === 0) { container.innerHTML = `<div class="text-center py-10 text-[8px] opacity-30 uppercase">NO TOURNAMENTS</div>`; return; } for (const [tid, data] of Object.entries(tours)) { const alphaCount = data.alpha ? Object.keys(data.alpha).length : 0; const omegaCount = data.omega ? Object.keys(data.omega).length : 0; container.innerHTML += `<div class="bg-white/5 p-5 rounded-2xl border border-white/10 mb-3"><div class="flex justify-between items-start flex-wrap gap-3"><div><div class="text-lg font-black italic uppercase text-white">${data.name || 'NO NAME'}</div><div class="text-[8px] opacity-30 mt-1">${data.code || 'NO CODE'} | ${data.format || 'N/A'} | ${alphaCount}+${omegaCount} players</div></div><div class="flex gap-2"><button onclick="core.openLobby('${tid}')" class="px-4 py-2 rounded-xl bg-blue-600/20 text-blue-400 text-[9px] font-black uppercase">VIEW</button><button onclick="core.modForceFinish('${tid}', '${data.name || 'TOURNAMENT'}')" class="px-4 py-2 rounded-xl bg-red-600/20 text-red-500 text-[9px] font-black uppercase">${window.t('force_finish')}</button><button onclick="core.deleteTourney('${tid}')" class="px-4 py-2 rounded-xl bg-white/10 text-white/40 text-[9px] font-black uppercase">${window.t('delete_event')}</button></div></div></div>`; } },
+      async modForceFinish(tid, name) { if(await this.ask(`FORCE FINISH ${name}?`)) { const tSnap = await get(ref(db, `tourneys/${tid}`)); const t = tSnap.val(); if (t && t.alpha && t.omega) { for (const uid of Object.keys(t.alpha)) { await update(ref(db, `users/${uid}`), { exr: increment(25), wins: increment(1) }); } for (const uid of Object.keys(t.omega)) { await update(ref(db, `users/${uid}`), { exr: increment(-15), losses: increment(1) }); } } await remove(ref(db, `tourneys/${tid}`)); await remove(ref(db, `chats/${tid}`)); addModLog('FORCE_FINISH_TOURNAMENT', null, null, name); this.notify(`TOURNAMENT ${name} FORCE FINISHED`); this.renderModTournaments(); this.loadList(); } },
+      async renderModReports() { const container = document.getElementById('mod-reports-list'); if (!container) return; const rSnap = await get(ref(db, 'reports')); const reports = rSnap.val() || {}; container.innerHTML = ''; if (Object.keys(reports).length === 0) { container.innerHTML = `<div class="text-center py-10 text-[8px] opacity-30 uppercase">${window.t('no_reports')}</div>`; return; } for (const [rid, data] of Object.entries(reports)) { const screenshotHtml = data.screenshot ? `<div class="mt-2"><img src="${data.screenshot}" class="max-w-[200px] max-h-[150px] rounded-xl border border-white/10"></div>` : ''; container.innerHTML += `<div class="bg-white/5 p-5 rounded-2xl border border-white/10 mb-3"><div class="flex justify-between items-start flex-wrap gap-3"><div class="flex-1"><div class="text-[10px] font-black uppercase text-red-400">${data.reporterName || 'UNKNOWN'} → ${data.reportedName || 'UNKNOWN'}</div><div class="text-[9px] opacity-60 mt-2">${data.reason || 'NO REASON'}</div>${screenshotHtml}<div class="text-[7px] opacity-20 mt-1">${data.timestamp ? new Date(data.timestamp).toLocaleString() : 'NO DATE'}</div></div><div class="flex gap-2"><button onclick="core.modResolveReport('${rid}', '${data.reportedUid || ''}', '${data.reportedName || ''}')" class="px-4 py-2 rounded-xl bg-green-600/20 text-green-500 text-[9px] font-black uppercase">BAN & RESOLVE</button><button onclick="core.modDismissReport('${rid}')" class="px-4 py-2 rounded-xl bg-white/10 text-white/40 text-[9px] font-black uppercase">DISMISS</button></div></div></div>`; } },
+      async modResolveReport(rid, reportedUid, reportedName) { if (reportedUid) { await update(ref(db, `users/${reportedUid}`), { isBan: true }); } await remove(ref(db, `reports/${rid}`)); addModLog('BAN_FROM_REPORT', reportedUid, reportedName); this.notify(`${reportedName || 'User'} BANNED FROM REPORT`); this.renderModReports(); this.renderModUsers(); },
+      async modDismissReport(rid) { await remove(ref(db, `reports/${rid}`)); this.notify('REPORT DISMISSED'); this.renderModReports(); },
+      renderModLogs() { const container = document.getElementById('mod-logs-list'); if (!container) return; const logsRef = query(ref(db, 'mod_logs'), limitToLast(100)); onValue(logsRef, (snap) => { const logs = snap.val() || {}; container.innerHTML = ''; if (Object.keys(logs).length === 0) { container.innerHTML = `<div class="text-center py-10 text-[8px] opacity-30 uppercase">NO LOGS</div>`; return; } Object.entries(logs).reverse().forEach(([lid, data]) => { container.innerHTML += `<div class="bg-white/5 p-4 rounded-xl border border-white/5 mb-2"><div class="flex justify-between items-start text-[9px] flex-wrap gap-2"><span class="text-blue-400 font-black">${data.adminName || 'SYSTEM'}</span><span class="text-white/60">${data.action || 'UNKNOWN'}</span><span class="text-white/30 text-[8px]">${data.targetName || data.details || '-'}</span><span class="text-white/20 text-[7px]">${data.timestamp ? new Date(data.timestamp).toLocaleString() : 'NO DATE'}</span></div></div>`; }); }); },
+      initModChat() { const container = document.getElementById('mod-chat-box'); if (!container) return; const chatRef = ref(db, 'mod_chat'); off(chatRef); onValue(query(chatRef, limitToLast(50)), (snap) => { container.innerHTML = ''; snap.forEach(msg => { const v = msg.val(); const isMe = v.uid === this.u.uid; const mid = msg.key; let content = ''; if (v.type === 'image') { content = `<img src="${v.msg}" class="max-w-[200px] rounded-xl border border-white/10">`; } else if (v.type === 'video') { content = `<div class="bg-black/20 p-2 rounded-xl"><video src="${v.msg}" controls class="max-w-[240px] rounded-xl"></video></div>`; } else if (v.type === 'audio') { const audioId = 'mod_audio_' + mid; const barsHtml = Array(20).fill(0).map(() => `<div class="wave-bar" style="height: ${Math.random() * 20 + 6}px"></div>`).join(''); content = `<div class="voice-message"><div style="display: flex; align-items: center; gap: 12px;"><button class="voice-play-btn" id="playBtn_${audioId}" onclick="core.toggleAudio('${audioId}', \`${v.msg}\`, true)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><polygon points="5 3 19 12 5 21 5 3" fill="white"/></svg></button><div style="flex: 1;"><div class="voice-waveform" id="waveform_${audioId}">${barsHtml}</div><div class="voice-progress-container"><div class="voice-progress-track" id="progressBar_${audioId}" onclick="core.seekAudio('${audioId}', event)"><div class="voice-progress-fill" id="progressFill_${audioId}" style="width: 0%"></div></div><div class="voice-time"><span id="currentTime_${audioId}">0:00</span><span id="duration_${audioId}">0:00</span></div></div></div></div><audio id="${audioId}" style="display: none;"></audio></div>`; } else if (v.type === 'file') { content = `<div class="bg-black/20 p-4 rounded-xl flex items-center gap-4"><div class="w-10 h-10 bg-blue-600 rounded flex items-center justify-center text-[8px]">DOC</div><div class="flex-1"><div class="text-[7px] opacity-40 uppercase mb-2">${v.fileName || 'FILE'}</div><button onclick="core.downloadFile('${v.msg}', '${v.fileName}')" class="text-blue-500 font-black text-[9px] uppercase">DOWNLOAD</button></div></div>`; } else { content = v.msg || ''; if (v.edited) content += ` <span class="text-[6px] opacity-30">(edited)</span>`; } const actionButtons = isMe ? `<div class="flex gap-2 mt-1 justify-end"><button onclick="core.openModEditModal('${mid}', '${(v.msg || '').replace(/'/g, "\\'")}')" class="opacity-50 hover:opacity-100 transition p-1.5 rounded-lg hover:bg-white/10">${editIcon}</button><button onclick="core.deleteModMessage('${mid}')" class="opacity-50 hover:opacity-100 transition p-1.5 rounded-lg hover:bg-white/10">${deleteIcon}</button></div>` : ''; container.innerHTML += `<div class="flex flex-col ${isMe ? 'items-end' : 'items-start'} mb-3"><div class="text-[6px] opacity-30 mb-1">${v.name || 'UNKNOWN'}</div><div class="px-4 py-2 rounded-xl text-[9px] font-black ${isMe ? 'bg-blue-600/30 text-blue-400' : 'bg-white/10 text-white/70'}">${content}</div>${actionButtons}</div>`; container.scrollTop = container.scrollHeight; }); }); },
+      async sendModChat() { const input = document.getElementById('mod-chat-in'); if (!input.value.trim()) return; await push(ref(db, 'mod_chat'), { uid: this.u.uid, name: this.userData.name, msg: input.value.trim(), type: 'text', timestamp: Date.now() }); input.value = ''; },
+      async renderModPanel() { if (!this.isModerator()) { this.notify(window.t('access_denied'), "err"); this.show('home'); return; } await this.renderModUsers(); await this.renderModTournaments(); await this.renderModReports(); this.renderModLogs(); this.initModChat(); this.switchModTab('users'); },
 
-      async renderModPanel() {
-        if (!this.isModerator()) { this.notify(window.t('access_denied'), "err"); this.show('home'); return; }
-        await this.renderModUsers();
-        await this.renderModTournaments();
-        await this.renderModReports();
-        this.renderModLogs();
-        this.initModChat();
-        this.switchModTab('users');
-      },
+      async showMini(uid) { const s = await get(ref(db, `users/${uid}`)), d = s.val(); if(!d) return; const style = this.getUserStyle(d); const exr = d.exr || 0; const level = this.getExrLevel(exr); const nextExr = this.getExrNext(exr); const isOnline = this.isUserOnline(uid); const fSnap = await get(ref(db, `friends/${this.u.uid}/${uid}`)), fStatus = fSnap.val(); let friendBtn = ''; if (uid !== this.u.uid) { if (!fStatus) friendBtn = `<button onclick="core.addFriend('${uid}')" class="w-full py-4 bg-blue-600/20 text-blue-500 rounded-2xl text-[8px] font-black uppercase mt-2">${window.t('add_friend')}</button>`; else if (fStatus === 'pending_out') friendBtn = `<button class="w-full py-4 bg-white/5 text-white/20 rounded-2xl text-[8px] font-black uppercase mt-2" disabled>${window.t('sent')}</button>`; else if (fStatus === 'pending_in') friendBtn = `<button onclick="core.addFriend('${uid}')" class="w-full py-4 bg-green-600/20 text-green-500 rounded-2xl text-[8px] font-black uppercase mt-2">${window.t('accept')}</button>`; else friendBtn = `<div class="flex gap-2"><button onclick="core.openDm('${uid}', '${d.name}')" class="flex-1 py-4 bg-blue-600/20 text-blue-500 rounded-2xl text-[8px] font-black uppercase mt-2 flex items-center justify-center gap-2">${msgIcon} ${window.t('chat')}</button><button onclick="core.removeFriend('${uid}')" class="w-14 py-4 bg-red-600/10 text-red-500/40 rounded-2xl text-[8px] font-black uppercase mt-2">×</button></div>`; } let linksH = d.socials ? `<div class="flex flex-wrap gap-2 justify-center mb-6">${Object.values(d.socials).map(sl => `<a href="${sl.url}" target="_blank" class="bg-white/5 px-3 py-2 rounded-lg text-[7px] font-black text-blue-500 border border-white/5 uppercase">${sl.label}</a>`).join('')}</div>` : ''; const isAdmin = this.userData?.isMaker || this.userData?.isAdmin; const banBtn = (isAdmin && !d.isMaker && uid !== this.u.uid) ? `<button onclick="core.modBanUser('${uid}', '${d.name}', ${d.isBan || false})" class="mt-2 w-full py-4 ${d.isBan ? 'bg-green-600/20 text-green-500' : 'bg-red-600/20 text-red-500'} rounded-2xl text-[8px] font-black uppercase tracking-[0.3em]">${d.isBan ? 'UNBAN' : 'BAN'}</button>` : ''; const reportBtn = `<button onclick="core.openReportModal('${uid}', '${d.name}')" class="w-full py-4 bg-red-600/20 text-red-500 rounded-2xl text-[8px] font-black uppercase mt-2">⚠ REPORT</button>`; const iconId = 'mini-exr-icon-' + Math.random().toString(36).substr(2, 9); document.getElementById('mini-content').innerHTML = `<div class="bg-[#0a0a0a] w-[340px] rounded-[3rem] overflow-hidden border ${d.isBan ? 'border-red-600' : 'border-white/10'} shadow-2xl relative"><div class="h-28 bg-zinc-900 bg-cover bg-center" style="background-image:url(${d.banner||''})"></div><div class="px-8 pb-10 text-center"><div class="relative inline-block"><div class="w-20 h-20 mx-auto -mt-10 mb-4 bg-zinc-800 rounded-[2rem] border-[4px] border-[#0a0a0a] bg-cover bg-center" style="background-image:url(${d.avatar||''})"></div><div class="absolute bottom-2 right-2 w-4 h-4 rounded-full border-2 border-[#0a0a0a] ${isOnline ? 'bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.8)]' : 'bg-gray-500'}"></div></div><h3 class="text-2xl font-black italic uppercase tracking-tighter ${style.class}">${d.name}</h3><p class="text-[7px] font-black opacity-40 tracking-[0.4em] mt-1 mb-4 text-white">${style.sub}</p><div class="flex items-center gap-3 bg-white/5 px-4 py-2 rounded-xl border border-white/5 mb-6"><div class="text-[10px] font-black text-blue-500 italic truncate flex-1">${uid}</div><button onclick="core.copyId('${uid}')" class="bg-white/10 px-3 py-1 rounded-lg text-[7px] font-black uppercase text-white active:scale-95">${window.t('copy')}</button></div>${linksH}<div class="bg-white/5 p-6 rounded-[2rem] border border-white/5 w-full mb-4"><div class="flex items-center gap-3"><div id="${iconId}" class="flex-shrink-0 w-16 h-10 text-blue-500"></div><div class="flex-grow"><div class="flex items-center justify-between"><div class="text-left"><p class="text-2xl font-black text-blue-500">${exr}</p><p class="text-[6px] font-black text-blue-500/50 uppercase">EXR</p></div><div class="text-right"><p class="text-xl font-black text-blue-500">${level.name}</p><p class="text-[6px] opacity-40 uppercase">${this.getExrLevelName(level)}</p></div></div><div class="mt-3 w-full bg-white/5 h-2 rounded-full overflow-hidden"><div class="h-full bg-blue-500" style="width: ${this.getExrProgress(exr)}%"></div></div><div class="mt-1 text-right"><span class="text-[6px] opacity-40">${window.t('to_next')}: ${nextExr} EXR</span></div></div></div></div><div class="grid grid-cols-3 gap-2 mb-4"><div class="bg-white/5 p-4 rounded-2xl border border-white/5"><p class="text-white font-black text-xl">${this.formatHours(d.hours)}</p><p class="text-[6px] opacity-30 uppercase mt-1">${window.t('hours')}</p></div><div class="bg-white/5 p-4 rounded-2xl border border-white/5"><p class="text-blue-400 font-black text-xl">${d.wins || 0}</p><p class="text-[6px] opacity-30 uppercase mt-1">${window.t('wins')}</p></div><div class="bg-white/5 p-4 rounded-2xl border border-white/5"><p class="text-red-400 font-black text-xl">${d.losses || 0}</p><p class="text-[6px] opacity-30 uppercase mt-1">${window.t('losses')}</p></div></div><div class="mt-2 flex flex-col gap-2">${friendBtn}${reportBtn}${banBtn}<button onclick="document.getElementById('mini-modal').classList.add('hidden')" class="w-full py-4 bg-white/5 rounded-2xl text-[8px] font-black opacity-40 uppercase text-white">${window.t('close')}</button></div></div></div>`; document.getElementById('mini-modal').classList.remove('hidden'); setTimeout(() => this.renderExrIcon(level.level, iconId), 50); },
 
-      async showMini(uid) {
-        const s = await get(ref(db, `users/${uid}`)), d = s.val(); if(!d) return;
-        const style = this.getUserStyle(d);
-        const exr = d.exr || 0;
-        const level = this.getExrLevel(exr);
-        const nextExr = this.getExrNext(exr);
-        const isOnline = this.isUserOnline(uid);
-        const fSnap = await get(ref(db, `friends/${this.u.uid}/${uid}`)), fStatus = fSnap.val();
-        let friendBtn = '';
-        if (uid !== this.u.uid) {
-          if (!fStatus) friendBtn = `<button onclick="core.addFriend('${uid}')" class="w-full py-4 bg-blue-600/20 text-blue-500 rounded-2xl text-[8px] font-black uppercase mt-2">${window.t('add_friend')}</button>`;
-          else if (fStatus === 'pending_out') friendBtn = `<button class="w-full py-4 bg-white/5 text-white/20 rounded-2xl text-[8px] font-black uppercase mt-2" disabled>${window.t('sent')}</button>`;
-          else if (fStatus === 'pending_in') friendBtn = `<button onclick="core.addFriend('${uid}')" class="w-full py-4 bg-green-600/20 text-green-500 rounded-2xl text-[8px] font-black uppercase mt-2">${window.t('accept')}</button>`;
-          else friendBtn = `<div class="flex gap-2"><button onclick="core.openDm('${uid}', '${d.name}')" class="flex-1 py-4 bg-blue-600/20 text-blue-500 rounded-2xl text-[8px] font-black uppercase mt-2 flex items-center justify-center gap-2">${msgIcon} ${window.t('chat')}</button><button onclick="core.removeFriend('${uid}')" class="w-14 py-4 bg-red-600/10 text-red-500/40 rounded-2xl text-[8px] font-black uppercase mt-2">×</button></div>`;
-        }
-        let linksH = d.socials ? `<div class="flex flex-wrap gap-2 justify-center mb-6">${Object.values(d.socials).map(sl => `<a href="${sl.url}" target="_blank" class="bg-white/5 px-3 py-2 rounded-lg text-[7px] font-black text-blue-500 border border-white/5 uppercase">${sl.label}</a>`).join('')}</div>` : '';
-        const isAdmin = this.userData?.isMaker || this.userData?.isAdmin;
-        const banBtn = (isAdmin && !d.isMaker && uid !== this.u.uid) ? `<button onclick="core.modBanUser('${uid}', '${d.name}', ${d.isBan || false})" class="mt-2 w-full py-4 ${d.isBan ? 'bg-green-600/20 text-green-500' : 'bg-red-600/20 text-red-500'} rounded-2xl text-[8px] font-black uppercase tracking-[0.3em]">${d.isBan ? 'UNBAN' : 'BAN'}</button>` : '';
-        const reportBtn = `<button onclick="core.openReportModal('${uid}', '${d.name}')" class="w-full py-4 bg-red-600/20 text-red-500 rounded-2xl text-[8px] font-black uppercase mt-2">⚠ REPORT</button>`;
-        const iconId = 'mini-exr-icon-' + Math.random().toString(36).substr(2, 9);
-        
-        document.getElementById('mini-content').innerHTML = `<div class="bg-[#0a0a0a] w-[340px] rounded-[3rem] overflow-hidden border ${d.isBan ? 'border-red-600' : 'border-white/10'} shadow-2xl relative">
-          <div class="h-28 bg-zinc-900 bg-cover bg-center" style="background-image:url(${d.banner||''})"></div>
-          <div class="px-8 pb-10 text-center">
-            <div class="relative inline-block">
-              <div class="w-20 h-20 mx-auto -mt-10 mb-4 bg-zinc-800 rounded-[2rem] border-[4px] border-[#0a0a0a] bg-cover bg-center" style="background-image:url(${d.avatar||''})"></div>
-              <div class="absolute bottom-2 right-2 w-4 h-4 rounded-full border-2 border-[#0a0a0a] ${isOnline ? 'bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.8)]' : 'bg-gray-500'}"></div>
-            </div>
-            <h3 class="text-2xl font-black italic uppercase tracking-tighter ${style.class}">${d.name}</h3>
-            <p class="text-[7px] font-black opacity-40 tracking-[0.4em] mt-1 mb-4 text-white">${style.sub}</p>
-            <div class="flex items-center gap-3 bg-white/5 px-4 py-2 rounded-xl border border-white/5 mb-6">
-              <div class="text-[10px] font-black text-blue-500 italic truncate flex-1">${uid}</div>
-              <button onclick="core.copyId('${uid}')" class="bg-white/10 px-3 py-1 rounded-lg text-[7px] font-black uppercase text-white active:scale-95">${window.t('copy')}</button>
-            </div>
-            ${linksH}
-            <div class="bg-white/5 p-6 rounded-[2rem] border border-white/5 w-full mb-4">
-              <div class="flex items-center gap-3">
-                <div id="${iconId}" class="flex-shrink-0 w-16 h-10 text-blue-500"></div>
-                <div class="flex-grow">
-                  <div class="flex items-center justify-between">
-                    <div class="text-left"><p class="text-2xl font-black text-blue-500">${exr}</p><p class="text-[6px] font-black text-blue-500/50 uppercase">EXR</p></div>
-                    <div class="text-right"><p class="text-xl font-black text-blue-500">${level.name}</p><p class="text-[6px] opacity-40 uppercase">${this.getExrLevelName(level)}</p></div>
-                  </div>
-                  <div class="mt-3 w-full bg-white/5 h-2 rounded-full overflow-hidden"><div class="h-full bg-blue-500" style="width: ${this.getExrProgress(exr)}%"></div></div>
-                  <div class="mt-1 text-right"><span class="text-[6px] opacity-40">${window.t('to_next')}: ${nextExr} EXR</span></div>
-                </div>
-              </div>
-            </div>
-            <div class="grid grid-cols-3 gap-2 mb-4">
-              <div class="bg-white/5 p-4 rounded-2xl border border-white/5"><p class="text-white font-black text-xl">${this.formatHours(d.hours)}</p><p class="text-[6px] opacity-30 uppercase mt-1">${window.t('hours')}</p></div>
-              <div class="bg-white/5 p-4 rounded-2xl border border-white/5"><p class="text-blue-400 font-black text-xl">${d.wins || 0}</p><p class="text-[6px] opacity-30 uppercase mt-1">${window.t('wins')}</p></div>
-              <div class="bg-white/5 p-4 rounded-2xl border border-white/5"><p class="text-red-400 font-black text-xl">${d.losses || 0}</p><p class="text-[6px] opacity-30 uppercase mt-1">${window.t('losses')}</p></div>
-            </div>
-            <div class="mt-2 flex flex-col gap-2">
-              ${friendBtn}
-              ${reportBtn}
-              ${banBtn}
-              <button onclick="document.getElementById('mini-modal').classList.add('hidden')" class="w-full py-4 bg-white/5 rounded-2xl text-[8px] font-black opacity-40 uppercase text-white">${window.t('close')}</button>
-            </div>
-          </div>
-        </div>`;
-        document.getElementById('mini-modal').classList.remove('hidden');
-        setTimeout(() => this.renderExrIcon(level.level, iconId), 50);
-      },
+      async renderProfile(uid) { this.renderFriendsList(uid); const uRef = ref(db, `users/${uid}`); off(uRef); onValue(uRef, (s) => { const d = s.val(); if(!d) return; const isMy = uid === this.u.uid, style = this.getUserStyle(d), banner = document.getElementById('p-banner'); const exr = d.exr || 0; const level = this.getExrLevel(exr); const nextExr = this.getExrNext(exr); const isOnline = this.isUserOnline(uid); banner.style.backgroundImage = d.banner ? `url(${d.banner})` : 'none'; if(isMy) { banner.onclick = () => document.getElementById('bi-set').click(); banner.classList.add('cursor-pointer'); } document.getElementById('p-avatar-wrap').innerHTML = `<div class="relative inline-block"><div id="p-avatar" class="w-32 h-32 md:w-48 md:h-48 bg-zinc-800 border-[8px] border-[#060606] bg-cover bg-center rounded-[2.5rem] relative z-10" style="background-image:url(${d.avatar||''})" onclick="if(${isMy}) document.getElementById('ai-set').click()"></div><div class="absolute bottom-2 right-2 w-5 h-5 md:w-6 md:h-6 rounded-full border-2 border-[#060606] ${isOnline ? 'bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.8)]' : 'bg-gray-500'}"></div></div>`; document.getElementById('p-name-container').innerHTML = `<div class="flex items-center gap-4 flex-wrap"><h2 class="text-4xl md:text-8xl font-black italic uppercase tracking-tighter ${style.class} leading-none">${d.name}</h2>${isMy ? `<button onclick="core.openEditName()" class="w-10 h-10 bg-white/5 border border-white/10 rounded-2xl flex items-center justify-center opacity-30 text-white">✎</button>` : ''}</div>`; document.getElementById('p-sub-container').innerHTML = `<div class="flex flex-col md:flex-row md:items-center gap-4 mt-4"><p class="text-[10px] font-black opacity-20 tracking-[0.5em] uppercase text-white">${style.sub}</p><div class="flex items-center gap-3 bg-white/5 px-4 py-2 rounded-xl border border-white/5 max-w-fit"><div class="text-[10px] font-black text-blue-500 italic truncate">${uid}</div><button onclick="core.copyId('${uid}')" class="bg-white/10 px-3 py-1 rounded-lg text-[7px] font-black uppercase text-white active:scale-95">${window.t('copy')}</button></div></div>`; document.getElementById('p-exr-container').innerHTML = `<div class="bg-white/5 p-8 rounded-[2rem] border border-white/5 w-full relative overflow-visible"><div class="flex items-center gap-4"><div id="exr-mini-icon" class="flex-shrink-0"></div><div class="flex-grow"><div class="flex items-center justify-between"><div><p class="text-5xl font-black text-blue-500">${exr}</p><p class="text-[8px] font-black text-blue-500/50 uppercase">EXR</p></div><div class="text-right"><p class="text-3xl font-black text-blue-500">${level.name}</p><p class="text-[8px] opacity-40 uppercase">${this.getExrLevelName(level)}</p></div></div><div class="mt-6 w-full bg-white/5 h-3 rounded-full overflow-hidden"><div class="h-full bg-blue-500" style="width: ${this.getExrProgress(exr)}%"></div></div><div class="mt-2 text-right"><span class="text-[8px] opacity-40">${window.t('to_next')}: ${nextExr} EXR</span></div></div></div></div>`; document.getElementById('p-wins').innerText = d.wins || 0; document.getElementById('p-losses').innerText = d.losses || 0; setTimeout(() => this.renderExrIcon(level.level, 'exr-mini-icon'), 100); document.getElementById('p-hours').innerText = this.formatHours(d.hours); const lb = document.getElementById('p-links'); lb.innerHTML = ''; if(d.socials) Object.entries(d.socials).forEach(([id, sl]) => { lb.innerHTML += `<div class="bg-white/5 p-5 border border-white/5 mb-3 flex justify-between items-center rounded-[1.5rem]"><div class="overflow-hidden"><div class="text-[8px] opacity-30 font-black uppercase text-white">${sl.label}</div><a href="${sl.url}" target="_blank" class="text-blue-500 font-bold text-xs uppercase truncate block">URL</a></div>${isMy ? `<div class="flex gap-2"><button onclick="core.openLinkEdit('${id}', '${sl.label}', '${sl.url}')" class="w-10 h-10 bg-white/5 rounded-xl text-[10px] opacity-20 hover:opacity-100">✎</button><button onclick="core.deleteLink('${id}')" class="w-10 h-10 bg-white/5 rounded-xl text-[14px] opacity-20 hover:opacity-100 hover:text-red-500">×</button></div>` : ''}</div>`; }); if(isMy) { let shopH = `<div class="mt-8 pt-8 border-t border-white/5"><button onclick="core.openLinkEdit()" class="w-full bg-white/5 py-4 font-black uppercase text-[8px] rounded-2xl border border-white/5 text-white/40 mb-10">${window.t('add_link')}</button>`; shopH += `<div class="mb-10 space-y-6"><div class="p-8 bg-yellow-500/5 border border-yellow-500/10 rounded-[2.5rem] relative overflow-hidden group"><div class="text-[8px] font-black text-yellow-500 tracking-[0.4em] mb-6 uppercase italic">${window.t('pro_service')}</div><div class="grid grid-cols-1 md:grid-cols-2 gap-3"><a href="https://www.sberbank.ru/ru/choise_bank?requisiteNumber=79192892667&bankCode=100000000111" target="_blank" class="bg-yellow-500 py-4 rounded-2xl text-black font-black text-[10px] text-center uppercase">${window.t('sber')}</a><a href="http://t.me/ARENAexeSUPPORT?direct" target="_blank" class="bg-white/10 py-4 rounded-2xl text-white font-black text-[10px] text-center">${window.t('support')}</a></div></div><div class="p-8 bg-red-600/5 border border-red-600/10 rounded-[2.5rem] relative overflow-hidden group"><div class="text-[8px] font-black text-red-600 tracking-[0.4em] mb-6 uppercase italic">${window.t('become_admin')}</div><a href="http://t.me/ARENAexeSUPPORT?direct" target="_blank" class="w-full block bg-red-600 py-4 rounded-2xl text-white font-black text-[10px] text-center uppercase">${window.t('contact_owner')}</a></div></div>`; document.getElementById('p-edit-controls').innerHTML = shopH + `</div>`; document.getElementById('p-edit-controls').classList.remove('hidden'); } document.getElementById('p-logout-btn').classList.toggle('hidden', !isMy); }); },
 
-      async renderProfile(uid) {
-        this.renderFriendsList(uid);
-        const uRef = ref(db, `users/${uid}`);
-        off(uRef);
-        onValue(uRef, (s) => {
-          const d = s.val(); if(!d) return;
-          const isMy = uid === this.u.uid, style = this.getUserStyle(d), banner = document.getElementById('p-banner');
-          const exr = d.exr || 0;
-          const level = this.getExrLevel(exr);
-          const nextExr = this.getExrNext(exr);
-          const isOnline = this.isUserOnline(uid);
-          banner.style.backgroundImage = d.banner ? `url(${d.banner})` : 'none';
-          if(isMy) { banner.onclick = () => document.getElementById('bi-set').click(); banner.classList.add('cursor-pointer'); }
-          document.getElementById('p-avatar-wrap').innerHTML = `<div class="relative inline-block"><div id="p-avatar" class="w-32 h-32 md:w-48 md:h-48 bg-zinc-800 border-[8px] border-[#060606] bg-cover bg-center rounded-[2.5rem] relative z-10" style="background-image:url(${d.avatar||''})" onclick="if(${isMy}) document.getElementById('ai-set').click()"></div><div class="absolute bottom-2 right-2 w-5 h-5 md:w-6 md:h-6 rounded-full border-2 border-[#060606] ${isOnline ? 'bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.8)]' : 'bg-gray-500'}"></div></div>`;
-          document.getElementById('p-name-container').innerHTML = `<div class="flex items-center gap-4 flex-wrap"><h2 class="text-4xl md:text-8xl font-black italic uppercase tracking-tighter ${style.class} leading-none">${d.name}</h2>${isMy ? `<button onclick="core.openEditName()" class="w-10 h-10 bg-white/5 border border-white/10 rounded-2xl flex items-center justify-center opacity-30 text-white">✎</button>` : ''}</div>`;
-          document.getElementById('p-sub-container').innerHTML = `<div class="flex flex-col md:flex-row md:items-center gap-4 mt-4"><p class="text-[10px] font-black opacity-20 tracking-[0.5em] uppercase text-white">${style.sub}</p><div class="flex items-center gap-3 bg-white/5 px-4 py-2 rounded-xl border border-white/5 max-w-fit"><div class="text-[10px] font-black text-blue-500 italic truncate">${uid}</div><button onclick="core.copyId('${uid}')" class="bg-white/10 px-3 py-1 rounded-lg text-[7px] font-black uppercase text-white active:scale-95">${window.t('copy')}</button></div></div>`;
-          document.getElementById('p-exr-container').innerHTML = `<div class="bg-white/5 p-8 rounded-[2rem] border border-white/5 w-full relative overflow-visible"><div class="flex items-center gap-4"><div id="exr-mini-icon" class="flex-shrink-0"></div><div class="flex-grow"><div class="flex items-center justify-between"><div><p class="text-5xl font-black text-blue-500">${exr}</p><p class="text-[8px] font-black text-blue-500/50 uppercase">EXR</p></div><div class="text-right"><p class="text-3xl font-black text-blue-500">${level.name}</p><p class="text-[8px] opacity-40 uppercase">${this.getExrLevelName(level)}</p></div></div><div class="mt-6 w-full bg-white/5 h-3 rounded-full overflow-hidden"><div class="h-full bg-blue-500" style="width: ${this.getExrProgress(exr)}%"></div></div><div class="mt-2 text-right"><span class="text-[8px] opacity-40">${window.t('to_next')}: ${nextExr} EXR</span></div></div></div></div>`;
-          document.getElementById('p-wins').innerText = d.wins || 0;
-          document.getElementById('p-losses').innerText = d.losses || 0;
-          setTimeout(() => this.renderExrIcon(level.level, 'exr-mini-icon'), 100);
-          document.getElementById('p-hours').innerText = this.formatHours(d.hours);
-          const lb = document.getElementById('p-links'); lb.innerHTML = '';
-          if(d.socials) Object.entries(d.socials).forEach(([id, sl]) => {
-              lb.innerHTML += `<div class="bg-white/5 p-5 border border-white/5 mb-3 flex justify-between items-center rounded-[1.5rem]"><div class="overflow-hidden"><div class="text-[8px] opacity-30 font-black uppercase text-white">${sl.label}</div><a href="${sl.url}" target="_blank" class="text-blue-500 font-bold text-xs uppercase truncate block">URL</a></div>${isMy ? `<div class="flex gap-2"><button onclick="core.openLinkEdit('${id}', '${sl.label}', '${sl.url}')" class="w-10 h-10 bg-white/5 rounded-xl text-[10px] opacity-20 hover:opacity-100">✎</button><button onclick="core.deleteLink('${id}')" class="w-10 h-10 bg-white/5 rounded-xl text-[14px] opacity-20 hover:opacity-100 hover:text-red-500">×</button></div>` : ''}</div>`;
-          });
-          if(isMy) {
-            let shopH = `<div class="mt-8 pt-8 border-t border-white/5"><button onclick="core.openLinkEdit()" class="w-full bg-white/5 py-4 font-black uppercase text-[8px] rounded-2xl border border-white/5 text-white/40 mb-10">${window.t('add_link')}</button>`;
-            shopH += `<div class="mb-10 space-y-6"><div class="p-8 bg-yellow-500/5 border border-yellow-500/10 rounded-[2.5rem] relative overflow-hidden group"><div class="text-[8px] font-black text-yellow-500 tracking-[0.4em] mb-6 uppercase italic">${window.t('pro_service')}</div><div class="grid grid-cols-1 md:grid-cols-2 gap-3"><a href="https://www.sberbank.ru/ru/choise_bank?requisiteNumber=79192892667&bankCode=100000000111" target="_blank" class="bg-yellow-500 py-4 rounded-2xl text-black font-black text-[10px] text-center uppercase">${window.t('sber')}</a><a href="http://t.me/ARENAexeSUPPORT?direct" target="_blank" class="bg-white/10 py-4 rounded-2xl text-white font-black text-[10px] text-center">${window.t('support')}</a></div></div><div class="p-8 bg-red-600/5 border border-red-600/10 rounded-[2.5rem] relative overflow-hidden group"><div class="text-[8px] font-black text-red-600 tracking-[0.4em] mb-6 uppercase italic">${window.t('become_admin')}</div><a href="http://t.me/ARENAexeSUPPORT?direct" target="_blank" class="w-full block bg-red-600 py-4 rounded-2xl text-white font-black text-[10px] text-center uppercase">${window.t('contact_owner')}</a></div></div>`;
-            document.getElementById('p-edit-controls').innerHTML = shopH + `</div>`;
-            document.getElementById('p-edit-controls').classList.remove('hidden');
-          }
-          document.getElementById('p-logout-btn').classList.toggle('hidden', !isMy);
-        });
-      },
+      loadList() { const tRef = ref(db, 'tourneys'); off(tRef); onValue(tRef, (snap) => { const g = document.getElementById('tourney-grid'); g.innerHTML = ''; const data = snap.val(); if(!data) return; Object.entries(data).reverse().forEach(([id, t]) => { g.innerHTML += `<div onclick="core.openLobby('${id}')" class="bg-[#0d0d0d] border border-white/5 hover:border-blue-600 rounded-[2.5rem] overflow-hidden group cursor-pointer transition-all"><div class="h-56 bg-zinc-900 bg-cover bg-center group-hover:scale-105 transition duration-700" style="background-image:url(${t.cover || ''})"></div><div class="p-8 flex justify-between items-start"><div><h3 class="text-2xl font-black italic uppercase tracking-tighter leading-none text-white">${t.name}</h3><div class="mt-4"><p class="text-[9px] text-blue-500 font-black uppercase tracking-widest">${window.t('format')}: ${t.format} • ${window.t('prize')}: ${t.prize}</p></div></div><div class="text-right"><div class="text-[9px] font-black text-white/20 mb-1">${t.code}</div><div class="text-[8px] opacity-10 font-black uppercase text-white">${t.date}</div></div></div></div>`; }); }); },
 
-      loadList() {
-        const tRef = ref(db, 'tourneys');
-        off(tRef);
-        onValue(tRef, (snap) => {
-          const g = document.getElementById('tourney-grid'); g.innerHTML = '';
-          const data = snap.val(); if(!data) return;
-          Object.entries(data).reverse().forEach(([id, t]) => {
-            g.innerHTML += `<div onclick="core.openLobby('${id}')" class="bg-[#0d0d0d] border border-white/5 hover:border-blue-600 rounded-[2.5rem] overflow-hidden group cursor-pointer transition-all"><div class="h-56 bg-zinc-900 bg-cover bg-center group-hover:scale-105 transition duration-700" style="background-image:url(${t.cover || ''})"></div><div class="p-8 flex justify-between items-start"><div><h3 class="text-2xl font-black italic uppercase tracking-tighter leading-none text-white">${t.name}</h3><div class="mt-4"><p class="text-[9px] text-blue-500 font-black uppercase tracking-widest">${window.t('format')}: ${t.format} • ${window.t('prize')}: ${t.prize}</p></div></div><div class="text-right"><div class="text-[9px] font-black text-white/20 mb-1">${t.code}</div><div class="text-[8px] opacity-10 font-black uppercase text-white">${t.date}</div></div></div></div>`;
-          });
-        });
-      },
-
-      async openLobby(tid) {
-        this.currentTid = tid; this.show('lobby'); this.listenChat(tid);
-        const lRef = ref(db, `tourneys/${tid}`);
-        off(lRef);
-        onValue(lRef, async (snap) => {
-          const t = snap.val(); if(!t || this.currentTid !== tid) return;
-          const ownerSnap = await get(ref(db, `users/${t.owner}`)), ownerData = ownerSnap.val(), ownerStyle = this.getUserStyle(ownerData);
-          document.getElementById('l-cover').style.backgroundImage = `url(${t.cover || ''})`;
-          const isAdmin = this.userData?.isMaker || this.userData?.isAdmin || t.owner === this.u.uid;
-          document.getElementById('ln-container').innerHTML = `<h1 id="ln" class="text-5xl font-black uppercase italic tracking-tighter text-white">${t.name}</h1>${isAdmin ? `<button onclick="core.openEditTourney()" class="w-10 h-10 bg-white/5 border border-white/10 rounded-2xl flex items-center justify-center opacity-30 text-white">✎</button>` : ''}`;
-          document.getElementById('l-code-text').innerText = t.code;
-          document.getElementById('lp').innerText = `${window.t('prize')}: ${t.prize} | ${window.t('format')}: ${t.format}`;
-          document.getElementById('l-owner').innerHTML = `<span class="opacity-20 mr-2">${window.t('by')}</span><span onclick="core.showMini('${t.owner}')" class="cursor-pointer hover:opacity-100 ${ownerStyle.class}">${ownerData?.name || '...'}</span>`;
-          const isMember = (t.alpha && t.alpha[this.u.uid]) || (t.omega && t.omega[this.u.uid]);
-          document.getElementById('l-link-box').innerHTML = (t.link && (isMember || isAdmin)) ? `<div class="flex gap-2"><button onclick="core.openSecurityLink('${t.link}')" class="bg-white/5 border border-white/10 w-12 h-12 flex items-center justify-center rounded-xl text-white/40 hover:text-blue-500 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg></button><a href="${t.link}" target="_blank" class="bg-blue-600 px-6 py-3 rounded-xl text-[9px] font-black tracking-widest text-white flex items-center">${window.t('connect')}</a></div>` : '';
-          document.getElementById('ldesc').innerText = t.desc;
-          document.getElementById('lobby-controls').innerHTML = isAdmin ? `<button onclick="core.deleteTourney('${tid}')" class="text-[9px] text-red-500 font-black uppercase opacity-30">${window.t('delete_event')}</button>` : '';
-          const finishBtnContainer = document.getElementById('finish-btn-container');
-          if (isAdmin && t.alpha && t.omega && Object.keys(t.alpha).length > 0 && Object.keys(t.omega).length > 0) {
-            finishBtnContainer.innerHTML = `<div class="w-full mt-6 mb-8"><button onclick="core.askFinish()" class="w-full bg-red-600 py-8 rounded-2xl font-black text-[14px] uppercase tracking-widest text-white border-2 border-red-500 shadow-[0_0_30px_rgba(220,38,38,0.5)] hover:scale-[1.02] transition-all duration-300">${window.t('finish_match')}</button></div>`;
-          } else { finishBtnContainer.innerHTML = ''; }
-          this.renderTeam('alpha', t.alpha, t.format, t.status || 'open'); 
-          this.renderTeam('omega', t.omega, t.format, t.status || 'open');
-        });
-      },
+      async openLobby(tid) { this.currentTid = tid; this.show('lobby'); this.listenChat(tid); const lRef = ref(db, `tourneys/${tid}`); off(lRef); onValue(lRef, async (snap) => { const t = snap.val(); if(!t || this.currentTid !== tid) return; const ownerSnap = await get(ref(db, `users/${t.owner}`)), ownerData = ownerSnap.val(), ownerStyle = this.getUserStyle(ownerData); document.getElementById('l-cover').style.backgroundImage = `url(${t.cover || ''})`; const isAdmin = this.userData?.isMaker || this.userData?.isAdmin || t.owner === this.u.uid; document.getElementById('ln-container').innerHTML = `<h1 id="ln" class="text-5xl font-black uppercase italic tracking-tighter text-white">${t.name}</h1>${isAdmin ? `<button onclick="core.openEditTourney()" class="w-10 h-10 bg-white/5 border border-white/10 rounded-2xl flex items-center justify-center opacity-30 text-white">✎</button>` : ''}`; document.getElementById('l-code-text').innerText = t.code; document.getElementById('lp').innerText = `${window.t('prize')}: ${t.prize} | ${window.t('format')}: ${t.format}`; document.getElementById('l-owner').innerHTML = `<span class="opacity-20 mr-2">${window.t('by')}</span><span onclick="core.showMini('${t.owner}')" class="cursor-pointer hover:opacity-100 ${ownerStyle.class}">${ownerData?.name || '...'}</span>`; const isMember = (t.alpha && t.alpha[this.u.uid]) || (t.omega && t.omega[this.u.uid]); document.getElementById('l-link-box').innerHTML = (t.link && (isMember || isAdmin)) ? `<div class="flex gap-2"><button onclick="core.openSecurityLink('${t.link}')" class="bg-white/5 border border-white/10 w-12 h-12 flex items-center justify-center rounded-xl text-white/40 hover:text-blue-500 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg></button><a href="${t.link}" target="_blank" class="bg-blue-600 px-6 py-3 rounded-xl text-[9px] font-black tracking-widest text-white flex items-center">${window.t('connect')}</a></div>` : ''; document.getElementById('ldesc').innerText = t.desc; document.getElementById('lobby-controls').innerHTML = isAdmin ? `<button onclick="core.deleteTourney('${tid}')" class="text-[9px] text-red-500 font-black uppercase opacity-30">${window.t('delete_event')}</button>` : ''; const finishBtnContainer = document.getElementById('finish-btn-container'); if (isAdmin && t.alpha && t.omega && Object.keys(t.alpha).length > 0 && Object.keys(t.omega).length > 0) { finishBtnContainer.innerHTML = `<div class="w-full mt-6 mb-8"><button onclick="core.askFinish()" class="w-full bg-red-600 py-8 rounded-2xl font-black text-[14px] uppercase tracking-widest text-white border-2 border-red-500 shadow-[0_0_30px_rgba(220,38,38,0.5)] hover:scale-[1.02] transition-all duration-300">${window.t('finish_match')}</button></div>`; } else { finishBtnContainer.innerHTML = ''; } this.renderTeam('alpha', t.alpha, t.format, t.status || 'open'); this.renderTeam('omega', t.omega, t.format, t.status || 'open'); }); },
       
-      async renderTeam(side, p, format, status) {
-        const box = document.getElementById('t-' + side), parts = format.split(/v|vs/i).map(s => parseInt(s.trim()));
-        const limit = side === 'alpha' ? (parts[0] || 1) : (parts[1] || 1), count = p ? Object.keys(p).length : 0;
-        let h = `<div class="text-[10px] font-black uppercase mb-6 text-center tracking-[0.4em] ${side==='alpha'?'text-blue-500':'text-red-500'}">${side} [${count}/${limit}]</div>`;
-        if(p) {
-          for (const [uid, name] of Object.entries(p)) {
-            const s = await get(ref(db, `users/${uid}`)), st = this.getUserStyle(s.val());
-            const isOnline = this.isUserOnline(uid);
-            h += `<div onclick="core.showMini('${uid}')" class="relative bg-white/5 p-5 border-l-4 ${side==='alpha'?'border-blue-600':'border-red-600'} mb-3 text-xs font-black uppercase italic rounded-[1.2rem] flex justify-between items-center"><div class="flex items-center gap-2"><div class="relative"><div class="w-2 h-2 rounded-full ${isOnline ? 'bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.8)]' : 'bg-gray-500'}"></div></div><span class="${st.class}">${name}</span></div>${uid === this.u.uid && status === 'open' ? `<div onclick="event.stopPropagation(); core.leaveTeam('${side}')" class="bg-red-500/10 text-red-500 px-3 py-1 rounded-lg text-[7px] border border-red-500/20 font-black">LEAVE</div>` : ''}</div>`;
-          }
-        }
-        for(let i=count; i<limit; i++) h += `<div onclick="core.join('${side}')" class="border border-dashed border-white/5 p-5 mb-3 text-center opacity-20 text-[8px] font-black uppercase cursor-pointer rounded-[1.2rem] hover:opacity-100 text-white">${window.t('vacant')}</div>`;
-        box.innerHTML = h;
-      },
+      async renderTeam(side, p, format, status) { const box = document.getElementById('t-' + side), parts = format.split(/v|vs/i).map(s => parseInt(s.trim())); const limit = side === 'alpha' ? (parts[0] || 1) : (parts[1] || 1), count = p ? Object.keys(p).length : 0; let h = `<div class="text-[10px] font-black uppercase mb-6 text-center tracking-[0.4em] ${side==='alpha'?'text-blue-500':'text-red-500'}">${side} [${count}/${limit}]</div>`; if(p) { for (const [uid, name] of Object.entries(p)) { const s = await get(ref(db, `users/${uid}`)), st = this.getUserStyle(s.val()); const isOnline = this.isUserOnline(uid); h += `<div onclick="core.showMini('${uid}')" class="relative bg-white/5 p-5 border-l-4 ${side==='alpha'?'border-blue-600':'border-red-600'} mb-3 text-xs font-black uppercase italic rounded-[1.2rem] flex justify-between items-center"><div class="flex items-center gap-2"><div class="relative"><div class="w-2 h-2 rounded-full ${isOnline ? 'bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.8)]' : 'bg-gray-500'}"></div></div><span class="${st.class}">${name}</span></div>${uid === this.u.uid && status === 'open' ? `<div onclick="event.stopPropagation(); core.leaveTeam('${side}')" class="bg-red-500/10 text-red-500 px-3 py-1 rounded-lg text-[7px] border border-red-500/20 font-black">LEAVE</div>` : ''}</div>`; } } for(let i=count; i<limit; i++) h += `<div onclick="core.join('${side}')" class="border border-dashed border-white/5 p-5 mb-3 text-center opacity-20 text-[8px] font-black uppercase cursor-pointer rounded-[1.2rem] hover:opacity-100 text-white">${window.t('vacant')}</div>`; box.innerHTML = h; },
 
       async login() { const n = document.getElementById('an').value.toLowerCase().trim(), p = document.getElementById('ap').value; signInWithEmailAndPassword(auth, n + "@arena.exe", p).catch(() => this.notify(window.t('access_denied'), "err")); },
       async register() { const n = document.getElementById('an').value.trim(), p = document.getElementById('ap').value; createUserWithEmailAndPassword(auth, n.toLowerCase() + "@arena.exe", p).then(async (c) => { await set(ref(db, 'users/' + c.user.uid), { uid: c.user.uid, name: n.toUpperCase(), exr: 0, wins: 0, losses: 0, hours: 0, isMaker: false, isBan: false, lastSeen: Date.now() }); }).catch(() => this.notify(window.t('reg_err'), "err")); },
@@ -786,6 +435,11 @@
       if (voiceBtn) {
         ['mousedown', 'touchstart'].forEach(evt => voiceBtn.addEventListener(evt, (e) => { e.preventDefault(); core.startRecording(); }));
         ['mouseup', 'mouseleave', 'touchend', 'touchcancel'].forEach(evt => voiceBtn.addEventListener(evt, (e) => { e.preventDefault(); core.stopRecording(); }));
+      }
+      const modVoiceBtn = document.getElementById('mod-voice-btn');
+      if (modVoiceBtn) {
+        ['mousedown', 'touchstart'].forEach(evt => modVoiceBtn.addEventListener(evt, (e) => { e.preventDefault(); core.startModRecording(); }));
+        ['mouseup', 'mouseleave', 'touchend', 'touchcancel'].forEach(evt => modVoiceBtn.addEventListener(evt, (e) => { e.preventDefault(); core.stopModRecording(); }));
       }
     });
   </script>
@@ -851,7 +505,7 @@
       <button data-tab="reports" onclick="core.switchModTab('reports')" class="mod-tab text-[10px] font-black uppercase tracking-wider pb-4 border-b-2 border-transparent text-white/40">REPORTS</button>
       <button data-tab="logs" onclick="core.switchModTab('logs')" class="mod-tab text-[10px] font-black uppercase tracking-wider pb-4 border-b-2 border-transparent text-white/40">LOGS</button>
       <button data-tab="chat" onclick="core.switchModTab('chat')" class="mod-tab text-[10px] font-black uppercase tracking-wider pb-4 border-b-2 border-transparent text-white/40">MOD CHAT</button>
-    </div><div id="mod-users" class="mod-tab-content"><h2 class="text-[10px] font-black opacity-30 mb-4 uppercase">USERS</h2><input type="text" id="mod-user-search" class="mod-search-input" placeholder="🔍 SEARCH BY NAME OR ID..." oninput="core.filterModUsers()"><div id="mod-users-list"></div></div><div id="mod-tournaments" class="mod-tab-content hidden"><h2 class="text-[10px] font-black opacity-30 mb-6 uppercase">TOURNAMENTS</h2><div id="mod-tournaments-list"></div></div><div id="mod-reports" class="mod-tab-content hidden"><h2 class="text-[10px] font-black opacity-30 mb-6 uppercase">REPORTS</h2><div id="mod-reports-list"></div></div><div id="mod-logs" class="mod-tab-content hidden"><h2 class="text-[10px] font-black opacity-30 mb-6 uppercase">LOGS</h2><div id="mod-logs-list" class="max-h-[500px] overflow-y-auto"></div></div><div id="mod-chat" class="mod-tab-content hidden"><h2 class="text-[10px] font-black opacity-30 mb-6 uppercase">MOD CHAT</h2><div id="mod-chat-box" class="h-[400px] overflow-y-auto bg-black/30 rounded-2xl p-6 mb-4 custom-scroll"></div><div class="flex gap-3"><input id="mod-chat-in" placeholder="MOD MESSAGE..." class="flex-1" onkeydown="if(event.key==='Enter')core.sendModChat()"><button onclick="core.sendModChat()" class="bg-blue-600 px-8 rounded-2xl font-black text-white">SEND</button></div></div></div></section>
+    </div><div id="mod-users" class="mod-tab-content"><h2 class="text-[10px] font-black opacity-30 mb-4 uppercase">USERS</h2><input type="text" id="mod-user-search" class="mod-search-input" placeholder="🔍 SEARCH BY NAME OR ID..." oninput="core.filterModUsers()"><div id="mod-users-list"></div></div><div id="mod-tournaments" class="mod-tab-content hidden"><h2 class="text-[10px] font-black opacity-30 mb-6 uppercase">TOURNAMENTS</h2><div id="mod-tournaments-list"></div></div><div id="mod-reports" class="mod-tab-content hidden"><h2 class="text-[10px] font-black opacity-30 mb-6 uppercase">REPORTS</h2><div id="mod-reports-list"></div></div><div id="mod-logs" class="mod-tab-content hidden"><h2 class="text-[10px] font-black opacity-30 mb-6 uppercase">LOGS</h2><div id="mod-logs-list" class="max-h-[500px] overflow-y-auto"></div></div><div id="mod-chat" class="mod-tab-content hidden"><h2 class="text-[10px] font-black opacity-30 mb-6 uppercase">MOD CHAT</h2><div id="mod-chat-box" class="h-[400px] overflow-y-auto bg-black/30 rounded-2xl p-6 mb-4 custom-scroll"></div><div class="flex gap-3"><input type="file" id="mod-file-input" class="hidden" onchange="core.sendModFile(event)"><button onclick="document.getElementById('mod-file-input').click()" class="bg-white/5 px-4 rounded-2xl text-white/20 hover:text-blue-500 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.51a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button><button id="mod-voice-btn" class="bg-white/5 px-4 rounded-2xl text-white/20 hover:text-red-500 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg></button><input id="mod-chat-in" placeholder="MOD MESSAGE..." class="flex-1" onkeydown="if(event.key==='Enter')core.sendModChat()"><button onclick="core.sendModChat()" class="bg-blue-600 px-8 rounded-2xl font-black text-white">SEND</button></div></div></div></section>
 
     <section id="section-lobby" class="section hidden"><div class="bg-[#080808] p-10 rounded-[3.5rem] grid grid-cols-1 lg:grid-cols-3 gap-12"><div class="lg:col-span-2"><div class="flex justify-between items-center mb-8"><button onclick="core.show('home')" class="text-[10px] font-black opacity-30 uppercase italic text-white" data-i18n="back">< BACK</button><div class="flex items-center gap-4 bg-white/5 px-6 py-3 rounded-2xl border border-white/10 shadow-xl"><div id="l-code-text" class="text-2xl font-black text-blue-500 italic tracking-tighter">CODE</div><button onclick="core.copyId(document.getElementById('l-code-text').innerText)" class="bg-white/10 px-3 py-1 rounded-lg text-[8px] font-black uppercase text-white" data-i18n="copy">COPY</button></div></div><div id="l-cover" class="h-64 bg-zinc-900 bg-cover bg-center mb-10 rounded-[2.5rem] shadow-2xl"></div><div id="ln-container" class="flex items-center gap-4 flex-wrap mb-2"></div><div id="l-owner" class="text-[9px] font-black uppercase tracking-[0.3em] mb-8 text-white"></div><div class="flex items-center gap-6 mb-12"><p id="lp" class="text-blue-500 font-black text-[10px] uppercase tracking-widest"></p><div id="l-link-box"></div></div><div id="finish-btn-container" class="w-full"></div><div class="grid grid-cols-1 md:grid-cols-2 gap-8 mb-10"><div id="t-alpha"></div><div id="t-omega"></div></div><div id="ldesc" class="bg-white/5 p-8 rounded-[1.5rem] text-[10px] opacity-40 uppercase text-white leading-relaxed"></div></div><div class="flex flex-col bg-black/40 rounded-[2.5rem] p-8 border border-white/5 h-[700px]"><div id="lobby-controls" class="mb-8"></div><div id="chat-box" class="flex-1 overflow-y-auto mb-6 custom-scroll"></div><div class="flex gap-3"><input id="chat-in" data-i18n-ph="message" class="flex-1" onkeydown="if(event.key==='Enter')core.sendMsg()"><button onclick="core.sendMsg()" class="bg-blue-600 px-6 rounded-2xl font-black text-white"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg></button></div></div></div></section>
   </main>
@@ -865,8 +519,10 @@
   <div id="link-modal" class="fixed inset-0 z-[500000] bg-black/95 flex items-center justify-center p-6 hidden"><div class="w-full max-w-xs bg-zinc-900 p-8 rounded-[3rem] border border-white/10"><h2 class="text-[10px] font-black uppercase mb-6 text-white text-center" data-i18n="social_link">SOCIAL LINK</h2><input id="link-label-in" data-i18n-ph="label" class="mb-4"><input id="link-url-in" placeholder="URL" class="mb-6"><div class="grid grid-cols-2 gap-4"><button onclick="core.saveLink()" class="bg-blue-600 py-4 rounded-2xl font-black text-[10px] uppercase text-white" data-i18n="save">SAVE</button><button onclick="document.getElementById('link-modal').classList.add('hidden')" class="bg-white/5 py-4 rounded-2xl font-black text-[10px] uppercase text-white" data-i18n="cancel">CANCEL</button></div></div></div>
   <div id="dm-modal" class="fixed inset-0 z-[400000] bg-black/95 flex items-center justify-center p-6 hidden"><div class="w-full max-lg bg-zinc-900 rounded-[3rem] border border-white/10 h-[600px] flex flex-col overflow-hidden"><div class="p-8 border-b border-white/5 flex justify-between items-center"><div><div class="text-[8px] opacity-20 font-black uppercase mb-1">DM</div><div id="dm-target-name" class="text-xl font-black italic uppercase text-blue-500">...</div></div><button onclick="document.getElementById('dm-modal').classList.add('hidden'); currentDmId = null;" class="text-xl opacity-30 text-white">×</button></div><div id="dm-box" class="flex-1 overflow-y-auto p-8 custom-scroll"></div><input type="file" id="dm-file-input" class="hidden" onchange="core.sendDmFile(event)"><div class="p-8 bg-black/40 flex gap-3"><button onclick="document.getElementById('dm-file-input').click()" class="bg-white/5 px-4 rounded-2xl text-white/20 hover:text-blue-500 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.51a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button><button id="voice-btn" class="bg-white/5 px-4 rounded-2xl text-white/20 hover:text-red-500 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg></button><input id="dm-in" placeholder="..." class="flex-1" onkeydown="if(event.key==='Enter')core.sendDm()"><button onclick="core.sendDm()" class="bg-blue-600 px-8 rounded-2xl font-black text-white"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg></button></div></div></div>
   
-  <div id="report-modal" class="fixed inset-0 z-[500000] bg-black/95 flex items-center justify-center p-6 hidden"><div class="w-full max-w-md bg-zinc-900 p-8 rounded-[3rem] border border-white/10"><h2 class="text-xl font-black italic uppercase mb-6 text-red-500 text-center" data-i18n="report_title">REPORT PLAYER</h2><textarea id="report-reason" class="w-full h-32 !text-[12px] !normal-case !uppercase" placeholder="Describe the reason..."></textarea><div class="flex gap-4 mt-6"><button onclick="core.submitReport()" class="flex-1 bg-red-600 py-4 rounded-2xl font-black text-[10px] uppercase text-white" data-i18n="submit_report">SEND REPORT</button><button onclick="document.getElementById('report-modal').classList.add('hidden'); pendingReportTarget=null;" class="px-8 bg-white/5 rounded-2xl font-black text-[10px] text-white uppercase" data-i18n="cancel">CANCEL</button></div></div></div>
+  <div id="report-modal" class="fixed inset-0 z-[500000] bg-black/95 flex items-center justify-center p-6 hidden"><div class="w-full max-w-md bg-zinc-900 p-8 rounded-[3rem] border border-white/10"><h2 class="text-xl font-black italic uppercase mb-6 text-red-500 text-center" data-i18n="report_title">REPORT PLAYER</h2><textarea id="report-reason" class="w-full h-24 !text-[12px] !normal-case !uppercase" placeholder="Describe the reason..."></textarea><div class="mt-4"><div class="flex items-center gap-3 mb-3"><button onclick="document.getElementById('report-screenshot-input').click()" class="bg-white/5 px-4 py-3 rounded-xl text-[8px] font-black uppercase" data-i18n="attach_screenshot">ATTACH SCREENSHOT</button><div id="report-screenshot-preview" class="w-16 h-16 bg-cover bg-center rounded-xl border border-white/10 hidden"></div></div><input type="file" id="report-screenshot-input" class="hidden" accept="image/*" onchange="core.attachReportScreenshot(event)"><input type="hidden" id="report-screenshot-data"></div><div class="flex gap-4 mt-6"><button onclick="core.submitReport()" class="flex-1 bg-red-600 py-4 rounded-2xl font-black text-[10px] uppercase text-white" data-i18n="submit_report">SEND REPORT</button><button onclick="document.getElementById('report-modal').classList.add('hidden'); pendingReportTarget=null;" class="px-8 bg-white/5 rounded-2xl font-black text-[10px] text-white uppercase" data-i18n="cancel">CANCEL</button></div></div></div>
   
   <div id="edit-modal" class="fixed inset-0 z-[500000] bg-black/95 flex items-center justify-center p-6 hidden"><div class="w-full max-w-md bg-zinc-900 p-8 rounded-[3rem] border border-white/10"><h2 class="text-xl font-black italic uppercase mb-6 text-blue-500 text-center" data-i18n="edit_title">EDIT MESSAGE</h2><textarea id="edit-text-input" class="w-full h-32 !text-[12px] !normal-case !uppercase" placeholder="Edit your message..."></textarea><div class="flex gap-4 mt-6"><button onclick="core.saveEditedMessage()" class="flex-1 bg-blue-600 py-4 rounded-2xl font-black text-[10px] uppercase text-white" data-i18n="save">SAVE</button><button onclick="document.getElementById('edit-modal').classList.add('hidden'); pendingEditMsgId=null;" class="px-8 bg-white/5 rounded-2xl font-black text-[10px] text-white uppercase" data-i18n="cancel">CANCEL</button></div></div></div>
+  
+  <div id="edit-mod-modal" class="fixed inset-0 z-[500000] bg-black/95 flex items-center justify-center p-6 hidden"><div class="w-full max-w-md bg-zinc-900 p-8 rounded-[3rem] border border-white/10"><h2 class="text-xl font-black italic uppercase mb-6 text-blue-500 text-center" data-i18n="edit_title">EDIT MOD MESSAGE</h2><textarea id="edit-mod-text-input" class="w-full h-32 !text-[12px] !normal-case !uppercase" placeholder="Edit your message..."></textarea><div class="flex gap-4 mt-6"><button onclick="core.saveEditedModMessage()" class="flex-1 bg-blue-600 py-4 rounded-2xl font-black text-[10px] uppercase text-white" data-i18n="save">SAVE</button><button onclick="document.getElementById('edit-mod-modal').classList.add('hidden'); pendingEditModMsgId=null;" class="px-8 bg-white/5 rounded-2xl font-black text-[10px] text-white uppercase" data-i18n="cancel">CANCEL</button></div></div></div>
 </body>
-    </html>
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        </html>
