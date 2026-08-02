@@ -1,0 +1,957 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>ONYX</title>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Montserrat:ital,wght@0,900;1,900&display=swap');
+    * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color: transparent; }
+    :root {
+      --bg: #0a0e12; --surface: #161c22; --surface-secondary: #212831; --border: #2a313a;
+      --text: #ffffff; --text-secondary: #8b95a5; --hover: #2a313a;
+      --primary: linear-gradient(135deg, #00c2ff 0%, #00ff95 50%, #ffe600 100%);
+      --danger: #ff4466;
+      --status-green: #3ba55c;
+    }
+    body.light { --bg: #f0f2f5; --surface: #ffffff; --surface-secondary: #f7f8fa; --border: #dde1e6; --text: #111; --text-secondary: #666; --hover: #e5e7eb; }
+    body { font-family: 'Montserrat', system-ui, sans-serif; background: var(--bg); color: var(--text); height: 100dvh; overflow: hidden; display: flex; align-items: center; justify-content: center; }
+    #app { width: 100%; height: 100dvh; background: var(--bg); display: flex; flex-direction: column; position: relative; }
+    @media (min-width: 640px) { #app { height: 95dvh; border-radius: 32px; border: 1px solid var(--border); box-shadow: 0 12px 40px rgba(0,0,0,0.8); margin: 12px auto; max-width: 500px; } }
+
+    /* LOGIN */
+    .login-wrapper { flex:1; display:flex; align-items:center; justify-content:center; background:var(--bg); padding:20px; }
+    .login-box { display:flex; flex-direction:column; gap:16px; background:var(--surface); padding:32px; border-radius:32px; border:1px solid var(--border); width:100%; max-width:400px; text-align:center; }
+    .login-box h2 { font-size:32px; font-weight:900; font-style:italic; letter-spacing:-1px; background: var(--primary); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    .login-input { width:100%; padding:14px; border-radius:16px; background:var(--surface-secondary); border:1px solid var(--border); color:var(--text); outline:none; font-size:14px; font-weight:bold; }
+    .login-btn { padding:14px; border-radius:16px; border:none; font-weight:900; cursor:pointer; width:100%; transition:0.2s; font-size:12px; text-transform:uppercase; }
+    .login-btn.primary { background:var(--primary); color:#000; }
+    .login-btn.google { background:#fff; color:#333; border:1px solid #ccc; display:flex; justify-content:center; align-items:center; gap:8px; }
+    .login-btn.secondary { background:var(--surface-secondary); color:var(--text); border:1px solid var(--border); }
+
+    /* NAV */
+    .bottom-nav { flex-shrink:0; height:70px; background:var(--surface); border-top:1px solid var(--border); display:flex; justify-content:space-around; align-items:center; padding-bottom:env(safe-area-inset-bottom,8px); z-index:10; }
+    .nav-item { display:flex; flex-direction:column; align-items:center; gap:4px; cursor:pointer; color:var(--text-secondary); transition:0.2s; padding:4px 12px; border-radius:12px; }
+    .nav-item.active { background: var(--primary); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+    .nav-item svg { width:24px; height:24px; fill:currentColor; }
+    .nav-item span { font-size:9px; font-weight:900; text-transform:uppercase; letter-spacing:0.5px; }
+
+    .view-container { flex:1; overflow-y:auto; display:flex; flex-direction:column; padding-bottom:env(safe-area-inset-bottom,0px); }
+    .view { display:none; flex-direction:column; height:100%; }
+    .view.active { display:flex; }
+
+    /* LISTS */
+    .list-header { padding:16px 20px; font-size:22px; font-weight:900; border-bottom:1px solid var(--border); background:var(--surface); flex-shrink:0; }
+    .friend-item, .request-item { display:flex; align-items:center; gap:12px; padding:12px 20px; border-bottom:1px solid var(--border); cursor:pointer; transition:0.1s; }
+    .friend-item:active, .request-item:active { background:var(--hover); }
+    .friend-avatar { width:44px; height:44px; border-radius:50%; background:var(--primary); display:flex; align-items:center; justify-content:center; font-weight:900; font-size:16px; color:#000; flex-shrink:0; overflow:hidden; }
+    .friend-avatar img { width:100%; height:100%; object-fit:cover; }
+    .friend-name { font-weight:900; font-size:15px; flex:1; }
+    .contact-badge { font-size:8px; padding:2px 8px; border-radius:10px; background:var(--primary); color:#000; font-weight:900; margin-left:8px; text-transform:uppercase; }
+    
+    .req-actions { display:flex; gap:8px; margin-left:auto; }
+    .req-btn { padding:6px 16px; border-radius:12px; border:none; font-weight:900; cursor:pointer; font-size:10px; text-transform:uppercase; }
+    .req-btn.accept { background:var(--primary); color:#000; }
+    .req-btn.reject { background:var(--danger); color:#fff; }
+
+    /* PROFILE - VK/TG STYLE */
+    .profile-scroll { flex:1; overflow-y:auto; padding-bottom:20px; background:var(--bg); }
+    .profile-banner-wrap { position:relative; width:100%; height:200px; background:var(--surface-secondary); overflow:hidden; cursor:pointer; }
+    .profile-banner-img { width:100%; height:100%; object-fit:cover; }
+    .profile-avatar-container { position:absolute; bottom:-48px; left:50%; transform:translateX(-50%); display:flex; flex-direction:column; align-items:center; }
+    .profile-avatar { width:96px; height:96px; border-radius:50%; background:var(--surface-secondary); border:4px solid var(--bg); display:flex; align-items:center; justify-content:center; font-size:36px; font-weight:900; overflow:hidden; }
+    .profile-avatar img { width:100%; height:100%; object-fit:cover; }
+    .profile-avatar-edit { position:absolute; bottom:4px; right:4px; background:var(--primary); border-radius:50%; width:28px; height:28px; display:flex; align-items:center; justify-content:center; border:2px solid var(--bg); cursor:pointer; color:#000; }
+    .profile-info-wrap { margin-top:60px; padding:0 16px 16px; display:flex; flex-direction:column; align-items:center; gap:12px; }
+    .profile-name { font-size:24px; font-weight:900; font-style:italic; background:var(--primary); -webkit-background-clip:text; -webkit-text-fill-color:transparent; }
+    .profile-actions { display:flex; gap:10px; width:100%; max-width:320px; }
+    .action-btn { flex:1; padding:12px; border-radius:16px; border:1px solid var(--border); background:var(--surface-secondary); color:var(--text); font-weight:900; font-size:11px; text-align:center; cursor:pointer; transition:0.2s; display:flex; align-items:center; justify-content:center; gap:6px; }
+    .action-btn:active { background:var(--hover); }
+    .profile-track { font-size:13px; color:var(--text-secondary); font-weight:500; padding:8px 16px; background:var(--surface-secondary); border-radius:20px; border:1px solid var(--border); }
+    .profile-info-grid { width:100%; max-width:400px; background:var(--surface); border-radius:20px; border:1px solid var(--border); padding:4px 0; overflow:hidden; }
+    .info-row { display:flex; justify-content:space-between; padding:12px 16px; border-bottom:1px solid var(--border); }
+    .info-row:last-child { border-bottom:none; }
+    .info-label { font-size:12px; font-weight:bold; color:var(--text-secondary); }
+    .info-value { font-size:14px; font-weight:bold; text-align:right; }
+    .profile-tabs { display:flex; width:100%; max-width:400px; border-bottom:1px solid var(--border); margin-top:16px; }
+    .profile-tab { flex:1; padding:12px; text-align:center; font-weight:bold; font-size:12px; color:var(--text-secondary); cursor:pointer; transition:0.2s; }
+    .profile-tab.active { color:var(--text); border-bottom:2px solid #00c2ff; }
+    
+    .story-grid { display:grid; grid-template-columns:repeat(3, 1fr); gap:8px; width:100%; max-width:400px; margin-top:12px; }
+    .story-item { aspect-ratio:1; background:var(--surface-secondary); border-radius:12px; border:1px solid var(--border); overflow:hidden; cursor:pointer; position:relative; }
+    .story-item img, .story-item video { width:100%; height:100%; object-fit:cover; }
+    .story-item .caption { position:absolute; bottom:0; left:0; right:0; background:rgba(0,0,0,0.6); padding:4px 8px; font-size:10px; font-weight:bold; color:#fff; text-align:center; }
+    .story-add-btn { display:flex; align-items:center; justify-content:center; background:var(--primary); border:none; border-radius:12px; color:#000; font-weight:900; cursor:pointer; aspect-ratio:1; }
+
+    /* CHAT */
+    .chat-screen { display:flex; flex-direction:column; height:100%; background:var(--bg); }
+    .chat-screen-header { display:flex; align-items:center; padding:12px 16px; background:var(--surface); border-bottom:1px solid var(--border); flex-shrink:0; }
+    .chat-screen-back { cursor:pointer; padding:8px; margin-right:8px; display:flex; align-items:center; color:var(--text-secondary); }
+    .chat-screen-title { flex:1; font-weight:900; font-size:16px; background:var(--primary); -webkit-background-clip:text; -webkit-text-fill-color:transparent; }
+    .chat-messages { flex:1; overflow-y:auto; padding:16px; display:flex; flex-direction:column; gap:8px; }
+    .chat-msg { max-width:80%; padding:10px 16px; border-radius:16px; align-self:flex-start; background:var(--surface-secondary); color:var(--text); border:1px solid var(--border); font-size:14px; font-weight:500; word-wrap:break-word; }
+    .chat-msg.own { align-self:flex-end; background:var(--primary); color:#000; border:none; }
+    .chat-msg .sender { font-size:10px; font-weight:900; color:var(--text-secondary); margin-bottom:4px; }
+    .chat-input-area { display:flex; gap:10px; padding:12px 16px; background:var(--surface); border-top:1px solid var(--border); flex-shrink:0; align-items:center; }
+    .chat-input-area input { flex:1; background:var(--surface-secondary); border:1px solid var(--border); border-radius:16px; padding:10px 16px; color:var(--text); outline:none; font-weight:bold; font-size:14px; }
+    .chat-input-area button { width:44px; height:44px; border-radius:50%; border:none; background:var(--primary); color:#000; display:flex; align-items:center; justify-content:center; cursor:pointer; flex-shrink:0; }
+
+    /* SETTINGS */
+    .settings-item { display:flex; align-items:center; gap:16px; padding:16px 20px; border-bottom:1px solid var(--border); cursor:pointer; transition:0.1s; }
+    .settings-item:active { background:var(--hover); }
+    .settings-icon { width:36px; height:36px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:16px; background:var(--primary); color:#000; }
+
+    /* MODALS */
+    .modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.85); backdrop-filter:blur(8px); z-index:9999; display:flex; align-items:center; justify-content:center; padding:20px; }
+    .modal-box { background:var(--surface); border-radius:32px; padding:24px; min-width:300px; max-width:90%; border:1px solid var(--border); display:flex; flex-direction:column; gap:16px; max-height:90vh; overflow-y:auto; }
+    .modal-title { font-weight:900; font-size:18px; text-align:center; }
+    .modal-input { padding:12px; border-radius:12px; background:var(--surface-secondary); border:1px solid var(--border); color:var(--text); outline:none; font-weight:bold; width:100%; }
+    .modal-buttons { display:flex; gap:10px; justify-content:flex-end; margin-top:8px; }
+    .modal-btn { padding:8px 20px; border-radius:12px; border:none; font-weight:900; cursor:pointer; font-size:12px; text-transform:uppercase; }
+    .modal-btn.primary { background:var(--primary); color:#000; }
+    .modal-btn.danger { background:var(--danger); color:#fff; }
+    .modal-btn.secondary { background:var(--surface-secondary); color:var(--text); border:1px solid var(--border); }
+  </style>
+</head>
+<body>
+<div id="app"><div style="text-align:center;color:#8b95a5;margin-top:40vh;font-weight:900;font-size:14px;">Загрузка ONYX...</div></div>
+
+<script>
+// ============ ГЛОБАЛЬНАЯ ЗАЩИТА ============
+window.onerror = function(msg) {
+  document.getElementById('app').innerHTML = `<div style="padding:40px;color:#ff4466;text-align:center;font-family:system-ui;margin-top:30vh;"><h2>ОШИБКА</h2><p style="font-size:13px;margin-top:10px;">${msg}</p></div>`;
+};
+
+// ============ ИНИЦИАЛИЗАЦИЯ FIREBASE ============
+let auth, db, googleProvider;
+try {
+  const firebaseConfig = {
+    apiKey: "AIzaSyBrv_u1yq-ncnBlyB1tqlN-eYstQ97dQGk",
+    authDomain: "onyx-a631b.firebaseapp.com",
+    databaseURL: "https://onyx-a631b-default-rtdb.europe-west1.firebasedatabase.app",
+    projectId: "onyx-a631b",
+    storageBucket: "onyx-a631b.firebasestorage.app",
+    messagingSenderId: "479145824873",
+    appId: "1:479145824873:web:d4ba27fd44b212f6eec8f8",
+    measurementId: "G-G6D8SH4PZD"
+  };
+  firebase.initializeApp(firebaseConfig);
+  auth = firebase.auth();
+  db = firebase.database();
+  googleProvider = new firebase.auth.GoogleAuthProvider();
+
+  function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+  // ============ КАСТОМНОЕ МОДАЛЬНОЕ ОКНО ============
+  function showModal(title, body, onConfirm = null, confirmText = 'Ок', isDanger = false) {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.innerHTML = `
+      <div class="modal-box">
+        <div class="modal-title">${title}</div>
+        <div style="font-size:14px;font-weight:500;color:var(--text-secondary);">${body}</div>
+        <div class="modal-buttons">
+          <button class="modal-btn secondary" onclick="this.closest('.modal-overlay').remove()">Отмена</button>
+          <button class="modal-btn ${isDanger ? 'danger' : 'primary'}" id="modalConfirmBtn">${confirmText}</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    const btn = overlay.querySelector('#modalConfirmBtn');
+    btn.onclick = function() {
+      if (typeof onConfirm === 'function') {
+        onConfirm();
+      }
+      overlay.remove();
+    };
+    return overlay;
+  }
+
+  // ============ ОСНОВНОЕ ПРИЛОЖЕНИЕ ============
+  window.core = {
+    u: null, data: null, activeTab: 'chats',
+    currentBotId: null, studioNodes: [], studioConnections: [], 
+    draggedNode: null, offsetX: 0, offsetY: 0, chatUnsub: null, tempBotAvatar: null,
+
+    // ========== ВХОД ==========
+    renderLogin: function() {
+      document.getElementById('app').innerHTML = `
+        <div class="login-wrapper">
+          <div class="login-box">
+            <h2>ONYX</h2>
+            <button class="login-btn google" onclick="core.handleGoogle()">
+              <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59A14.5 14.5 0 0 1 9.5 24c0-1.59.28-3.14.76-4.59l-7.98-6.19A23.99 23.99 0 0 0 0 24c0 3.77.87 7.35 2.56 10.56l7.97-5.97z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 5.97C6.51 42.62 14.62 48 24 48z"/></svg> Google
+            </button>
+            <div style="height:1px;background:var(--border);margin:8px 0;"></div>
+            <input id="email" class="login-input" placeholder="Email" type="email" />
+            <input id="pass" class="login-input" placeholder="Пароль" type="password" style="margin-top:8px;" />
+            <div style="display:flex; gap:8px; margin-top:12px;">
+              <button class="login-btn secondary" onclick="core.register()">Регистрация</button>
+              <button class="login-btn primary" onclick="core.login()">Войти</button>
+            </div>
+          </div>
+        </div>
+      `;
+    },
+
+    async login() {
+      const email = document.getElementById('email').value.trim();
+      const pass = document.getElementById('pass').value.trim();
+      try { await auth.signInWithEmailAndPassword(email, pass); } catch(e) { showModal('Ошибка входа', e.message); }
+    },
+    async register() {
+      const email = document.getElementById('email').value.trim();
+      const pass = document.getElementById('pass').value.trim();
+      try {
+        const cred = await auth.createUserWithEmailAndPassword(email, pass);
+        await db.ref('users/' + cred.user.uid).set({ username: email.split('@')[0], email: email, exp: 0 });
+      } catch(e) { showModal('Ошибка регистрации', e.message); }
+    },
+    async handleGoogle() {
+      try {
+        const cred = await auth.signInWithPopup(googleProvider);
+        const u = cred.user;
+        await db.ref('users/' + u.uid).set({ username: u.displayName || u.email.split('@')[0], email: u.email, avatar: u.photoURL || '', exp: 0 }, { merge: true });
+      } catch(e) { showModal('Ошибка Google', e.message); }
+    },
+
+    // ========== ЗАПУСК ==========
+    initApp(user) {
+      const userRef = db.ref('users/' + user.uid);
+      userRef.on('value', (snap) => {
+        if (snap.exists()) {
+          this.u = user; this.data = snap.val(); this.data.id = user.uid;
+          this.renderApp();
+        } else {
+          db.ref('users/' + user.uid).set({ username: user.email.split('@')[0], email: user.email, exp: 0 });
+        }
+      });
+    },
+
+    renderApp() {
+      if (!this.data) return;
+      document.getElementById('app').innerHTML = `
+        <div class="view-container" id="viewContainer">
+          <div class="view ${this.activeTab === 'chats' ? 'active' : ''}" id="view-chats"><div class="list-header">Чаты</div><div id="chatList" style="flex:1;overflow-y:auto;"></div></div>
+          <div class="view ${this.activeTab === 'contacts' ? 'active' : ''}" id="view-contacts">
+            <div class="list-header">Контакты</div>
+            <div style="padding:16px;">
+              <input id="searchUser" class="login-input" style="padding:10px;font-size:12px;" placeholder="Поиск..." />
+              <button class="login-btn primary" style="margin-top:8px;padding:8px;" onclick="core.findUser()">Найти и добавить</button>
+            </div>
+            <div id="contactList" style="flex:1;overflow-y:auto;padding-bottom:20px;"></div>
+          </div>
+          <div class="view ${this.activeTab === 'settings' ? 'active' : ''}" id="view-settings">
+            <div class="list-header">Настройки</div>
+            <div class="settings-item" onclick="core.openBotManager()">
+              <div class="settings-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l-9 4v8c0 5 9 7 9 7s9-2 9-7V6l-9-4z"/><path d="M9 12l2 2 4-4"/></svg></div>
+              <div style="font-weight:900;font-size:15px;flex:1;">Мои боты</div>
+            </div>
+            <div class="settings-item" onclick="core.toggleTheme()">
+              <div class="settings-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2"/><path d="M12 21v2"/><path d="M4.22 4.22l1.42 1.42"/><path d="M18.36 18.36l1.42 1.42"/><path d="M1 12h2"/><path d="M21 12h2"/><path d="M4.22 19.78l1.42-1.42"/><path d="M18.36 5.64l1.42-1.42"/></svg></div>
+              <div style="font-weight:900;font-size:15px;flex:1;">Тема</div>
+            </div>
+            <div class="settings-item" onclick="core.doLogout()">
+              <div class="settings-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg></div>
+              <div style="font-weight:900;font-size:15px;flex:1;color:var(--danger);">Выход</div>
+            </div>
+          </div>
+          <div class="view ${this.activeTab === 'profile' ? 'active' : ''}" id="view-profile">
+            <div class="profile-scroll" id="profileContainer"></div>
+          </div>
+        </div>
+        <div class="bottom-nav">
+          <div class="nav-item ${this.activeTab === 'chats' ? 'active' : ''}" onclick="core.switchTab('chats')"><svg viewBox="0 0 24 24"><path d="M20 2H4a2 2 0 0 0-2 2v18l4-4h14a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2z"/></svg><span>Чаты</span></div>
+          <div class="nav-item ${this.activeTab === 'contacts' ? 'active' : ''}" onclick="core.switchTab('contacts')"><svg viewBox="0 0 24 24"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg><span>Контакты</span></div>
+          <div class="nav-item ${this.activeTab === 'settings' ? 'active' : ''}" onclick="core.switchTab('settings')"><svg viewBox="0 0 24 24"><path d="M19.43 12.98c.04-.32.07-.64.07-.98s-.03-.66-.07-.98l2.11-1.65c.19-.15.24-.42.12-.64l-2-3.46c-.12-.22-.39-.3-.61-.22l-2.49 1c-.52-.4-1.08-.73-1.69-.98l-.38-2.65C14.46 2.18 14.25 2 14 2h-4c-.25 0-.46.18-.49.42l-.38 2.65c-.61.25-1.17.59-1.69.98l-2.49-1c-.23-.09-.49 0-.61.22l-2 3.46c-.13.22-.07.49.12.64l2.11 1.65c-.04.32-.07.65-.07.98s.03.66.07.98l-2.11 1.65c-.19.15-.24.42-.12.64l2 3.46c.12.22.39.3.61.22l2.49-1c.52.4 1.08.73 1.69.98l.38 2.65c.03.24.24.42.49.42h4c.25 0 .46-.18.49-.42l.38-2.65c.61-.25 1.17-.59 1.69-.98l2.49 1c.23.09.49 0 .61-.22l2-3.46c.12-.22.07-.49-.12-.64l-2.11-1.65zM12 15.5c-1.93 0-3.5-1.57-3.5-3.5s1.57-3.5 3.5-3.5 3.5 1.57 3.5 3.5-1.57 3.5-3.5 3.5z"/></svg><span>Настройки</span></div>
+          <div class="nav-item ${this.activeTab === 'profile' ? 'active' : ''}" onclick="core.switchTab('profile')"><svg viewBox="0 0 24 24"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg><span>Профиль</span></div>
+        </div>
+      `;
+      this.loadFriends();
+      this.renderProfile();
+    },
+
+    switchTab(tab) { this.activeTab = tab; this.renderApp(); },
+    doLogout() {
+      showModal('Выход', 'Вы уверены, что хотите выйти?', () => { auth.signOut(); }, 'Выйти', true);
+    },
+
+    // ========== ДРУЗЬЯ ==========
+    findUser() {
+      const nick = document.getElementById('searchUser').value.trim();
+      if (!nick) { showModal('Ошибка', 'Введите никнейм'); return; }
+      db.ref('users').orderByChild('username').equalTo(nick).once('value', (snap) => {
+        let found = false;
+        snap.forEach((child) => {
+          if (child.key !== this.u.uid) {
+            db.ref('friends/' + this.u.uid + '/outgoing/' + child.key).once('value', (s) => {
+              if (s.exists()) {
+                showModal('Внимание', 'Вы уже отправили заявку этому пользователю.');
+              } else {
+                db.ref('friends/' + this.u.uid + '/outgoing/' + child.key).set({ username: child.val().username });
+                db.ref('friends/' + child.key + '/incoming/' + this.u.uid).set({ username: this.data.username });
+                showModal('Успешно', 'Заявка отправлена!');
+              }
+            });
+            found = true;
+          }
+        });
+        if (!found) showModal('Не найдено', 'Пользователь не найден');
+      });
+    },
+
+    acceptFriend(friendUid) {
+      db.ref('friends/' + this.u.uid + '/incoming/' + friendUid).remove();
+      db.ref('friends/' + this.u.uid + '/accepted/' + friendUid).set(true);
+      db.ref('friends/' + friendUid + '/outgoing/' + this.u.uid).remove();
+      db.ref('friends/' + friendUid + '/accepted/' + this.u.uid).set(true);
+      this.loadFriends();
+    },
+
+    rejectFriend(friendUid) {
+      db.ref('friends/' + this.u.uid + '/incoming/' + friendUid).remove();
+      db.ref('friends/' + friendUid + '/outgoing/' + this.u.uid).remove();
+      this.loadFriends();
+    },
+
+    loadFriends() {
+      const container = document.getElementById('contactList');
+      if (!container) return;
+      container.innerHTML = `<div style="padding:16px;color:var(--text-secondary);font-weight:bold;">Загрузка...</div>`;
+      
+      db.ref('friends/' + this.u.uid + '/incoming').on('value', (snap) => {
+        let html = '';
+        if (snap.exists()) {
+          html += `<div style="padding:8px 16px;background:var(--surface-secondary);border-bottom:1px solid var(--border);font-weight:bold;color:var(--text-secondary);font-size:11px;">ВХОДЯЩИЕ ЗАЯВКИ</div>`;
+          snap.forEach((child) => {
+            const d = child.val();
+            html += `
+              <div class="request-item">
+                <div class="friend-avatar">${d.username[0].toUpperCase()}</div>
+                <div class="friend-name">${d.username}</div>
+                <div class="req-actions">
+                  <button class="req-btn accept" onclick="core.acceptFriend('${child.key}')">Принять</button>
+                  <button class="req-btn reject" onclick="core.rejectFriend('${child.key}')">✕</button>
+                </div>
+              </div>
+            `;
+          });
+        }
+        db.ref('friends/' + this.u.uid + '/accepted').on('value', (uSnap) => {
+          let friendHtml = '';
+          if (uSnap.exists()) {
+            friendHtml += `<div style="padding:8px 16px;background:var(--surface);border-bottom:1px solid var(--border);font-weight:bold;color:var(--text-secondary);font-size:11px;">КОНТАКТЫ</div>`;
+            uSnap.forEach((child) => {
+              db.ref('users/' + child.key).once('value', (uData) => {
+                const u = uData.val();
+                if (u) {
+                  friendHtml += `
+                    <div class="friend-item" onclick="core.openChat('${child.key}', '${esc(u.username)}')">
+                      <div class="friend-avatar">${u.avatar ? `<img src="${u.avatar}" />` : u.username[0].toUpperCase()}</div>
+                      <div class="friend-name">${u.username}</div>
+                      <div style="font-size:10px;color:var(--text-secondary);">В сети</div>
+                    </div>
+                  `;
+                  container.innerHTML = html + friendHtml;
+                }
+              });
+            });
+          } else {
+            if (!html) container.innerHTML = '<div style="padding:20px;color:var(--text-secondary);text-align:center;">У вас пока нет друзей или ботов.</div>';
+            else container.innerHTML = html;
+          }
+        });
+
+        db.ref('bots').orderByChild('owner').equalTo(this.u.uid).on('value', (botsSnap) => {
+          let botsHtml = '';
+          if (botsSnap.exists()) {
+            botsHtml = `<div style="padding:8px 16px;background:var(--surface);border-bottom:1px solid var(--border);font-weight:bold;color:var(--text-secondary);font-size:11px;">МОИ БОТЫ</div>`;
+            botsSnap.forEach((child) => {
+              const b = child.val();
+              const botId = child.key;
+              botsHtml += `
+                <div class="friend-item" onclick="core.openBotChat('${botId}', '${b.name}')">
+                  <div class="friend-avatar">${b.avatar ? `<img src="${b.avatar}" />` : '⚙️'}</div>
+                  <div class="friend-name">${b.name} <span class="contact-badge">BOT</span></div>
+                  <div style="font-size:10px;color:var(--text-secondary);">${b.desc || 'Без описания'}</div>
+                </div>
+              `;
+              if (container.innerHTML.includes('МОИ БОТЫ')) {
+                container.innerHTML = container.innerHTML.replace('</div><!-- BOT_END -->', botsHtml + '</div><!-- BOT_END -->');
+              } else {
+                container.innerHTML += botsHtml + '<!-- BOT_END -->';
+              }
+            });
+          }
+        });
+      });
+    },
+
+    // ========== ЧАТЫ ==========
+    openChat(friendId, friendName) {
+      const chatId = [this.u.uid, friendId].sort().join('_');
+      this.renderChatScreen(chatId, friendId, friendName, 'user');
+    },
+    openBotChat(botId, botName) {
+      const chatId = 'bot_' + botId;
+      this.renderChatScreen(chatId, botId, botName, 'bot');
+    },
+
+    renderChatScreen(chatId, targetId, targetName, type) {
+      if (this.chatUnsub) { this.chatUnsub.off(); this.chatUnsub = null; }
+      const container = document.getElementById('viewContainer');
+      container.innerHTML = `
+        <div class="chat-screen" id="chatScreen">
+          <div class="chat-screen-header">
+            <div class="chat-screen-back" onclick="core.renderApp()">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>
+            </div>
+            <div class="chat-screen-title">${esc(targetName)}</div>
+          </div>
+          <div class="chat-messages" id="chatMessagesContainer"></div>
+          <div class="chat-input-area">
+            <input id="chatMsgInput" placeholder="Сообщение..." onkeydown="if(event.key==='Enter') core.sendChatMsg('${chatId}', '${type}', '${targetId}')" />
+            <button onclick="core.sendChatMsg('${chatId}', '${type}', '${targetId}')"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M22 2L11 13"/><path d="M22 2L15 22L11 13L2 9L22 2Z"/></svg></button>
+          </div>
+        </div>
+      `;
+      this.loadChatMessages(chatId, type, targetId);
+    },
+
+    sendChatMsg(chatId, type, targetId) {
+      const input = document.getElementById('chatMsgInput');
+      if (!input || !input.value.trim()) return;
+      const txt = input.value.trim();
+      input.value = '';
+      db.ref('messages/' + chatId).push({ senderId: this.u.uid, username: this.data.username, text: txt, ts: Date.now() });
+      if (type === 'bot') {
+        this.runBotLogic(targetId, chatId, txt);
+      }
+    },
+
+    async runBotLogic(botId, chatId, userMsg) {
+      try {
+        const botSnap = await db.ref('bots/' + botId).once('value');
+        const bot = botSnap.val();
+        if (!bot || !bot.nodes || bot.nodes.length === 0) return;
+        const processNode = async (index) => {
+          if (index >= bot.nodes.length) return;
+          const node = bot.nodes[index];
+          if (node.name === 'Сообщение') {
+            db.ref('messages/' + chatId).push({
+              senderId: botId,
+              username: bot.name || 'Бот',
+              text: node.value || 'Привет!',
+              ts: Date.now()
+            });
+            const conn = bot.connections.find(c => c.from === node.id);
+            if (conn) processNode(conn.to);
+          } 
+          else if (node.name === 'Условие') {
+            try {
+              const condition = node.value || 'true';
+              const result = eval(`(function(text){ return ${condition}; })("${userMsg}")`);
+              if (result) {
+                const conn = bot.connections.find(c => c.from === node.id);
+                if (conn) processNode(conn.to);
+              }
+            } catch(e) { /* ignore */ }
+          }
+          else if (node.name === 'Ожидание' || node.name === 'Запрос') {
+            if (node.name === 'Запрос') {
+              db.ref('messages/' + chatId).push({
+                senderId: botId,
+                username: bot.name || 'Бот',
+                text: node.value || 'Пожалуйста, введите данные.',
+                ts: Date.now()
+              });
+            }
+            const conn = bot.connections.find(c => c.from === node.id);
+            if (conn) processNode(conn.to);
+          }
+        };
+        const startNode = bot.nodes.find(n => n.name === 'Старт');
+        if (startNode) processNode(startNode.id);
+      } catch(e) { console.error(e); }
+    },
+
+    loadChatMessages(chatId, type, targetId) {
+      const container = document.getElementById('chatMessagesContainer');
+      if (!container) return;
+      if (this.chatUnsub) { this.chatUnsub.off(); this.chatUnsub = null; }
+      const messagesRef = db.ref('messages/' + chatId).limitToLast(50);
+      this.chatUnsub = messagesRef.on('child_added', (snap) => {
+        const m = snap.val();
+        const own = m.senderId === this.u.uid;
+        const el = document.createElement('div');
+        el.className = 'chat-msg' + (own ? ' own' : '');
+        el.innerHTML = (own ? '' : `<div class="sender">${esc(m.username)}</div>`) + esc(m.text);
+        container.appendChild(el);
+        container.scrollTop = container.scrollHeight;
+      });
+    },
+
+    // ========== ПРОФИЛЬ (В СТИЛЕ VK/TG) ==========
+    renderProfile() {
+      const container = document.getElementById('profileContainer');
+      if (!container) return;
+      const u = this.data;
+      container.innerHTML = `
+        <div class="profile-banner-wrap" onclick="document.getElementById('bannerInp').click()">
+          <img src="${u.banner || ''}" class="profile-banner-img" alt="banner" />
+          <div class="profile-avatar-container">
+            <div class="profile-avatar" onclick="document.getElementById('avatarInp').click()">
+              ${u.avatar ? `<img src="${u.avatar}" />` : (u.username[0]||'U')}
+              <div class="profile-avatar-edit"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg></div>
+            </div>
+            <input id="avatarInp" type="file" accept="image/*" style="display:none;" onchange="core.uploadMedia(event, 'avatar')" />
+            <input id="bannerInp" type="file" accept="image/*" style="display:none;" onchange="core.uploadMedia(event, 'banner')" />
+          </div>
+        </div>
+        <div class="profile-info-wrap">
+          <div class="profile-name">${esc(u.username)}</div>
+          
+          <div class="profile-actions">
+            <button class="action-btn" onclick="document.getElementById('avatarInp').click()">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+              Выбрать фото
+            </button>
+            <button class="action-btn" onclick="core.openProfileEditor()">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+              Изменить
+            </button>
+            <button class="action-btn" onclick="core.switchTab('settings')">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19.43 12.98c.04-.32.07-.64.07-.98s-.03-.66-.07-.98l2.11-1.65c.19-.15.24-.42.12-.64l-2-3.46c-.12-.22-.39-.3-.61-.22l-2.49 1c-.52-.4-1.08-.73-1.69-.98l-.38-2.65C14.46 2.18 14.25 2 14 2h-4c-.25 0-.46.18-.49.42l-.38 2.65c-.61.25-1.17.59-1.69.98l-2.49-1c-.23-.09-.49 0-.61.22l-2 3.46c-.13.22-.07.49.12.64l2.11 1.65c-.04.32-.07.65-.07.98s.03.66.07.98l-2.11 1.65c-.19.15-.24.42-.12.64l2 3.46c.12.22.39.3.61.22l2.49-1c.52.4 1.08.73 1.69.98l.38 2.65c.03.24.24.42.49.42h4c.25 0 .46-.18.49-.42l.38-2.65c.61-.25 1.17-.59 1.69-.98l2.49 1c.23.09.49 0 .61-.22l2-3.46c.12-.22.07-.49-.12-.64l-2.11-1.65zM12 15.5c-1.93 0-3.5-1.57-3.5-3.5s1.57-3.5 3.5-3.5 3.5 1.57 3.5 3.5-1.57 3.5-3.5 3.5z"/></svg>
+              Настройки
+            </button>
+          </div>
+          <div class="profile-track">${u.favoriteTrack ? '🎵 ' + esc(u.favoriteTrack) : ''}</div>
+          <div class="profile-info-grid">
+            <div class="info-row">
+              <span class="info-label">О себе</span>
+              <span class="info-value">${u.bio ? esc(u.bio) : 'Расскажите о себе'}</span>
+            </div>
+            <div class="info-row">
+              <span class="info-label">Имя пользователя</span>
+              <span class="info-value">@${esc(u.username)}</span>
+            </div>
+            <div class="info-row">
+              <span class="info-label">День рождения</span>
+              <span class="info-value">${u.birthday ? esc(u.birthday) : 'Не указан'}</span>
+            </div>
+          </div>
+          <div class="profile-tabs">
+            <div class="profile-tab active" onclick="core.toggleProfileTab('posts', this)">Публикации</div>
+            <div class="profile-tab" onclick="core.toggleProfileTab('archive', this)">Архив публикаций</div>
+          </div>
+          <div id="storyGrid" class="story-grid"></div>
+        </div>
+      `;
+      this.renderStories();
+    },
+
+    toggleProfileTab(tabId, el) {
+      document.querySelectorAll('.profile-tab').forEach(t => t.classList.remove('active'));
+      el.classList.add('active');
+      if (tabId === 'archive') {
+         const grid = document.getElementById('storyGrid');
+         if (grid) grid.innerHTML = `<div style="grid-column:span 3;padding:20px;color:var(--text-secondary);text-align:center;font-size:12px;">Архив публикаций пока пуст...</div>`;
+      } else {
+         this.renderStories();
+      }
+    },
+
+    renderStories() {
+      const grid = document.getElementById('storyGrid');
+      if (!grid) return;
+      grid.innerHTML = '';
+      const addBtn = document.createElement('div');
+      addBtn.className = 'story-add-btn';
+      addBtn.innerHTML = `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>`;
+      addBtn.onclick = () => {
+         const input = document.createElement('input');
+         input.type = 'file';
+         input.accept = 'image/*,video/*';
+         input.onchange = (e) => {
+            const file = e.target.files[0];
+            if (file) {
+               const reader = new FileReader();
+               reader.onload = async (ev) => {
+                  // Показываем диалог для ввода описания
+                  showModal('Добавить публикацию', `
+                    <input id="storyCaption" class="modal-input" placeholder="Введите описание..." />
+                  `, async () => {
+                    const caption = document.getElementById('storyCaption').value.trim() || '';
+                    const storyRef = db.ref('users/' + this.u.uid + '/stories').push();
+                    await storyRef.set({ 
+                      url: ev.target.result, 
+                      type: file.type.startsWith('video') ? 'video' : 'image',
+                      caption: caption,
+                      ts: Date.now() 
+                    });
+                    this.renderStories();
+                  }, 'Опубликовать');
+               };
+               reader.readAsDataURL(file);
+            }
+         };
+         input.click();
+      };
+      grid.appendChild(addBtn);
+
+      db.ref('users/' + this.u.uid + '/stories').orderByChild('ts').limitToLast(20).on('value', (snap) => {
+         const oldStories = grid.querySelectorAll('.story-item');
+         oldStories.forEach(el => el.remove());
+         if (snap.exists()) {
+            const stories = [];
+            snap.forEach((child) => {
+               stories.push(child.val());
+            });
+            stories.reverse().forEach((story) => {
+               const el = document.createElement('div');
+               el.className = 'story-item';
+               if (story.type === 'video') {
+                 el.innerHTML = `<video src="${story.url}" muted loop playsinline></video>`;
+               } else {
+                 el.innerHTML = `<img src="${story.url}" />`;
+               }
+               if (story.caption) {
+                 const cap = document.createElement('div');
+                 cap.className = 'caption';
+                 cap.innerText = story.caption;
+                 el.appendChild(cap);
+               }
+               el.onclick = () => {
+                 const content = story.type === 'video' 
+                   ? `<video src="${story.url}" controls style="width:100%;max-height:70vh;border-radius:12px;"></video>` 
+                   : `<img src="${story.url}" style="width:100%;border-radius:12px;" />`;
+                 showModal('Публикация', content + (story.caption ? `<br/><i>${story.caption}</i>` : ''));
+               };
+               grid.appendChild(el);
+            });
+         }
+      });
+    },
+
+    uploadMedia(e, type) {
+      const f = e.target.files[0];
+      if (!f) return;
+      const r = new FileReader();
+      r.onload = (ev) => {
+        const upd = {}; upd[type] = ev.target.result;
+        db.ref('users/' + this.u.uid).update(upd);
+      };
+      r.readAsDataURL(f);
+    },
+
+    openProfileEditor() {
+      const u = this.data;
+      const overlay = document.createElement('div');
+      overlay.className = 'modal-overlay';
+      overlay.innerHTML = `
+        <div class="modal-box">
+          <div class="modal-title">Редактировать профиль</div>
+          <label style="font-size:11px;color:var(--text-secondary);">Имя пользователя</label>
+          <input id="editUsername" class="modal-input" value="${esc(u.username)}" placeholder="@username" />
+          <label style="font-size:11px;color:var(--text-secondary);margin-top:8px;">О себе</label>
+          <input id="editBio" class="modal-input" value="${esc(u.bio || '')}" placeholder="Расскажите о себе" />
+          <label style="font-size:11px;color:var(--text-secondary);margin-top:8px;">День рождения</label>
+          <input id="editBirthday" class="modal-input" value="${esc(u.birthday || '')}" placeholder="29 июн. 2007" />
+          <label style="font-size:11px;color:var(--text-secondary);margin-top:8px;">Любимый трек</label>
+          <input id="editTrack" class="modal-input" value="${esc(u.favoriteTrack || '')}" placeholder="Исполнитель - Трек" />
+          <button class="modal-btn secondary" onclick="document.getElementById('trackFileInput').click()" style="margin-top:8px;">Загрузить трек (файл)</button>
+          <input type="file" id="trackFileInput" accept="audio/*" style="display:none;" onchange="core.uploadMedia(event, 'favoriteTrack')" />
+          <div class="modal-buttons">
+            <button class="modal-btn secondary" onclick="this.closest('.modal-overlay').remove()">Отмена</button>
+            <button class="modal-btn primary" onclick="core.saveProfile()">Сохранить</button>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(overlay);
+    },
+
+    saveProfile() {
+      const username = document.getElementById('editUsername').value.trim();
+      const bio = document.getElementById('editBio').value.trim();
+      const birthday = document.getElementById('editBirthday').value.trim();
+      const track = document.getElementById('editTrack').value.trim();
+      const upd = {};
+      if (username) upd.username = username;
+      upd.bio = bio;
+      upd.birthday = birthday;
+      upd.favoriteTrack = track;
+      db.ref('users/' + this.u.uid).update(upd);
+      document.querySelector('.modal-overlay').remove();
+    },
+
+    toggleTheme() {
+      const cls = document.body.className === 'light' ? '' : 'light';
+      document.body.className = cls;
+      this.renderApp();
+    },
+
+    // ========== БОТЫ И СТУДИЯ ==========
+    openBotManager() {
+      const overlay = document.createElement('div');
+      overlay.className = 'modal-overlay';
+      overlay.style.alignItems = 'flex-start';
+      overlay.style.paddingTop = '40px';
+      overlay.innerHTML = `
+        <div class="modal-box" style="max-width:90%;width:400px;max-height:80vh;overflow-y:auto;">
+          <div class="modal-title">Мои боты</div>
+          <button class="modal-btn primary" onclick="core.createBot()" style="margin-bottom:16px;">➕ Создать бота</button>
+          <div id="myBotsList"></div>
+          <div class="modal-buttons"><button class="modal-btn secondary" onclick="this.closest('.modal-overlay').remove()">Закрыть</button></div>
+        </div>
+      `;
+      document.body.appendChild(overlay);
+      db.ref('bots').orderByChild('owner').equalTo(this.u.uid).on('value', (snap) => {
+        const listEl = document.getElementById('myBotsList');
+        if (!listEl) return;
+        listEl.innerHTML = '';
+        if (!snap.exists()) {
+          listEl.innerHTML = '<div style="color:var(--text-secondary);font-size:12px;text-align:center;padding:20px;">У вас пока нет ботов.</div>';
+          return;
+        }
+        snap.forEach((child) => {
+          const b = child.val();
+          const botId = child.key;
+          listEl.innerHTML += `
+            <div style="display:flex;align-items:center;gap:12px;padding:12px;border-bottom:1px solid var(--border);">
+              <div style="width:36px;height:36px;border-radius:50%;background:var(--primary);display:flex;align-items:center;justify-content:center;font-weight:bold;overflow:hidden;color:#000;flex-shrink:0;">${b.avatar ? `<img src="${b.avatar}" style="width:100%;height:100%;object-fit:cover;" />` : '🤖'}</div>
+              <div style="flex:1;font-weight:900;font-size:14px;">${esc(b.name)}</div>
+              <div style="display:flex;gap:4px;">
+                <button class="modal-btn primary" style="padding:4px 10px;font-size:9px;" onclick="core.editBot('${botId}')">⚙️</button>
+                <button class="modal-btn danger" style="padding:4px 10px;font-size:9px;" onclick="core.deleteBot('${botId}')">✕</button>
+              </div>
+            </div>
+          `;
+        });
+      });
+    },
+
+    createBot() {
+      this.currentBotId = null;
+      this.studioNodes = [];
+      this.studioConnections = [];
+      this.tempBotAvatar = null;
+      this.showBotEditor();
+    },
+
+    editBot(botId) {
+      this.currentBotId = botId;
+      db.ref('bots/' + botId).once('value', (snap) => {
+        const data = snap.val();
+        this.studioNodes = data.nodes || [];
+        this.studioConnections = data.connections || [];
+        this.showBotEditor(data);
+      });
+    },
+
+    showBotEditor(existingData) {
+      document.querySelector('.modal-overlay')?.remove();
+      const overlay = document.createElement('div');
+      overlay.className = 'modal-overlay';
+      overlay.style.alignItems = 'flex-start';
+      overlay.style.paddingTop = '20px';
+      overlay.innerHTML = `
+        <div class="modal-box" style="max-width:90%;width:400px;max-height:90vh;overflow-y:auto;">
+          <div class="modal-title">${existingData ? 'Редактировать бота' : 'Создать бота'}</div>
+          <label style="font-size:11px;color:var(--text-secondary);">Имя бота</label>
+          <input id="botName" class="modal-input" value="${existingData ? esc(existingData.name) : ''}" placeholder="Мой бот" />
+          <label style="font-size:11px;color:var(--text-secondary);margin-top:8px;">Описание</label>
+          <input id="botDesc" class="modal-input" value="${existingData ? esc(existingData.desc) : ''}" placeholder="Расскажите о боте..." />
+          <div style="display:flex;align-items:center;gap:12px;margin-top:12px;background:var(--surface-secondary);padding:8px;border-radius:16px;">
+            <div id="botAvatarPreview" style="width:48px;height:48px;border-radius:50%;background:var(--primary);display:flex;align-items:center;justify-content:center;font-size:24px;overflow:hidden;flex-shrink:0;color:#000;">${existingData?.avatar ? `<img src="${existingData.avatar}" style="width:100%;height:100%;object-fit:cover;" />` : '🤖'}</div>
+            <button class="modal-btn secondary" style="padding:4px 12px;" onclick="document.getElementById('botAvatarInput').click()">Сменить аватарку</button>
+            <input type="file" id="botAvatarInput" accept="image/*" style="display:none;" onchange="core.uploadBotAvatar(event)" />
+          </div>
+          <div class="modal-buttons" style="margin-top:16px;">
+            <button class="modal-btn secondary" onclick="this.closest('.modal-overlay').remove()">Отмена</button>
+            <button class="modal-btn primary" onclick="core.saveBotSettings()">Сохранить</button>
+          </div>
+          ${this.currentBotId ? `<div style="margin-top:12px;border-top:1px solid var(--border);padding-top:12px;">
+            <button class="modal-btn primary" style="width:100%;" onclick="core.launchStudioForBot()">Открыть студию (Блюпринты)</button>
+          </div>` : ''}
+        </div>
+      `;
+      document.body.appendChild(overlay);
+    },
+
+    uploadBotAvatar(e) {
+      const f = e.target.files[0];
+      if (!f) return;
+      const r = new FileReader();
+      r.onload = (ev) => {
+        document.getElementById('botAvatarPreview').innerHTML = `<img src="${ev.target.result}" style="width:100%;height:100%;object-fit:cover;" />`;
+        this.tempBotAvatar = ev.target.result;
+      };
+      r.readAsDataURL(f);
+    },
+
+    async saveBotSettings() {
+      const name = document.getElementById('botName').value.trim();
+      const desc = document.getElementById('botDesc').value.trim();
+      if (!name) { showModal('Ошибка', 'Введите имя бота'); return; }
+      const data = { name, desc, owner: this.u.uid };
+      if (this.tempBotAvatar) data.avatar = this.tempBotAvatar;
+      if (this.currentBotId) {
+        await db.ref('bots/' + this.currentBotId).update(data);
+      } else {
+        const newRef = db.ref('bots').push();
+        this.currentBotId = newRef.key;
+        await newRef.set({ 
+          ...data, 
+          nodes: [{ id: 0, name: 'Старт', x: 50, y: 50, value: '' }, { id: 1, name: 'Сообщение', x: 50, y: 200, value: 'Привет! Я твой новый бот!' }, { id: 2, name: 'Завершить', x: 50, y: 350, value: '' }],
+          connections: [{ from: 0, to: 1, x1: 130, y1: 90, x2: 130, y2: 200 }, { from: 1, to: 2, x1: 130, y1: 240, x2: 130, y2: 350 }]
+        });
+      }
+      showModal('Успешно', 'Настройки сохранены!');
+      document.querySelector('.modal-overlay')?.remove();
+      this.openBotManager();
+    },
+
+    async deleteBot(botId) {
+      if (!confirm('Удалить этого бота?')) return;
+      await db.ref('bots/' + botId).remove();
+      this.openBotManager();
+    },
+
+    launchStudioForBot() {
+      document.querySelector('.modal-overlay')?.remove();
+      this.openStudio();
+    },
+
+    openStudio() {
+      const overlay = document.createElement('div');
+      overlay.className = 'modal-overlay';
+      overlay.style.alignItems = 'flex-start';
+      overlay.style.paddingTop = '20px';
+      overlay.innerHTML = `
+        <div class="modal-box" style="max-width:95%;width:500px;max-height:90vh;display:flex;flex-direction:column;padding:16px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+            <span style="font-weight:900;">BLUEPRINT STUDIO</span>
+            <button class="modal-btn primary" onclick="core.saveStudio()" style="padding:4px 12px;font-size:10px;">💾 Сохранить</button>
+          </div>
+          <div style="display:flex;gap:4px;flex-wrap:wrap;padding-bottom:8px;border-bottom:1px solid var(--border);margin-bottom:8px;">
+            <button class="modal-btn secondary" style="padding:4px 8px;font-size:9px;" onclick="core.addNode('Старт')">Старт</button>
+            <button class="modal-btn secondary" style="padding:4px 8px;font-size:9px;" onclick="core.addNode('Сообщение')">Сооб.</button>
+            <button class="modal-btn secondary" style="padding:4px 8px;font-size:9px;" onclick="core.addNode('Ожидание')">Ожид.</button>
+            <button class="modal-btn secondary" style="padding:4px 8px;font-size:9px;" onclick="core.addNode('Условие')">Усл.</button>
+            <button class="modal-btn secondary" style="padding:4px 8px;font-size:9px;" onclick="core.addNode('Запрос')">Запрос</button>
+            <button class="modal-btn secondary" style="padding:4px 8px;font-size:9px;" onclick="core.addNode('Завершить')">Конец</button>
+            <button class="modal-btn danger" style="padding:4px 8px;font-size:9px;" onclick="core.clearStudio()">✖</button>
+          </div>
+          <div style="flex:1;overflow:hidden;position:relative;background:var(--surface-secondary);border-radius:16px;height:400px;" id="studioCanvas" onmouseup="core.endDrag()" onmousemove="core.dragNode(event)">
+            <svg style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;">
+              ${this.studioConnections.map(c => `<line x1="${c.x1}" y1="${c.y1}" x2="${c.x2}" y2="${c.y2}" stroke="#00c2ff" stroke-width="2" />`).join('')}
+            </svg>
+          </div>
+          <button class="modal-btn secondary" onclick="this.closest('.modal-overlay').remove()" style="margin-top:8px;">Закрыть</button>
+        </div>
+      `;
+      document.body.appendChild(overlay);
+      this.renderStudioView();
+    },
+
+    renderStudioView() {
+      const canvas = document.getElementById('studioCanvas');
+      if (!canvas) return;
+      let html = '';
+      this.studioNodes.forEach((n, i) => {
+        let inp = '';
+        if (['Сообщение', 'Условие', 'Запрос'].includes(n.name)) {
+          inp = `<input class="modal-input" style="padding:2px;font-size:9px;width:90%;margin-top:4px;" placeholder="Значение" id="node_${i}" value="${esc(n.value || '')}" onchange="core.updateNodeValue(${i}, this.value)" />`;
+        }
+        html += `
+          <div style="position:absolute;left:${n.x}px;top:${n.y}px;width:140px;padding:12px;background:var(--surface);border:1px solid var(--border);border-radius:12px;box-shadow:0 4px 12px rgba(0,0,0,0.5);cursor:grab;display:flex;flex-direction:column;align-items:center;gap:4px;" id="studioNode_${i}" onmousedown="core.startDragNode(event, ${i})">
+            <div style="font-weight:900;font-size:11px;">${n.name}</div>
+            ${inp}
+          </div>
+        `;
+      });
+      canvas.innerHTML = html + canvas.querySelector('svg').outerHTML;
+      const svg = canvas.querySelector('svg');
+      svg.innerHTML = this.studioConnections.map(c => `<line x1="${c.x1}" y1="${c.y1}" x2="${c.x2}" y2="${c.y2}" stroke="#00c2ff" stroke-width="2" />`).join('');
+      canvas.onclick = (e) => {
+        if (this.studioNodes.length > 1) {
+          const from = this.studioNodes[this.studioNodes.length - 2];
+          const to = this.studioNodes[this.studioNodes.length - 1];
+          if (!this.studioConnections.some(c => c.from === from.id && c.to === to.id)) {
+            this.studioConnections.push({
+              from: from.id, to: to.id,
+              x1: from.x + 70, y1: from.y + 40,
+              x2: to.x + 70, y2: to.y
+            });
+            this.renderStudioView();
+          }
+        }
+      };
+    },
+
+    addNode(name) {
+      const x = 50 + (this.studioNodes.length * 140) % 400;
+      const y = 50 + Math.floor((this.studioNodes.length * 140) / 400) * 80;
+      this.studioNodes.push({ id: this.studioNodes.length, name, x, y, value: '' });
+      this.renderStudioView();
+    },
+    updateNodeValue(i, val) { this.studioNodes[i].value = val; },
+    startDragNode(e, id) {
+      this.draggedNode = id;
+      const rect = e.target.closest('.studio-node').getBoundingClientRect();
+      this.offsetX = e.clientX - rect.left;
+      this.offsetY = e.clientY - rect.top;
+    },
+    dragNode(e) {
+      if (this.draggedNode === null) return;
+      const el = document.getElementById('studioNode_' + this.draggedNode);
+      if (!el) return;
+      const canvasRect = document.getElementById('studioCanvas').getBoundingClientRect();
+      const newX = e.clientX - canvasRect.left - this.offsetX;
+      const newY = e.clientY - canvasRect.top - this.offsetY;
+      el.style.left = newX + 'px';
+      el.style.top = newY + 'px';
+      this.studioNodes[this.draggedNode].x = newX;
+      this.studioNodes[this.draggedNode].y = newY;
+      this.studioConnections.forEach(c => {
+        const f = this.studioNodes[c.from];
+        const t = this.studioNodes[c.to];
+        if (f && t) {
+          c.x1 = f.x + 70; c.y1 = f.y + 40;
+          c.x2 = t.x + 70; c.y2 = t.y;
+        }
+      });
+      this.renderStudioView();
+    },
+    endDrag() { this.draggedNode = null; },
+    clearStudio() { this.studioNodes = []; this.studioConnections = []; this.renderStudioView(); },
+    async saveStudio() {
+      if (!this.currentBotId) { showModal('Ошибка', 'Сначала сохраните настройки бота.'); return; }
+      await db.ref('bots/' + this.currentBotId + '/nodes').set(this.studioNodes);
+      await db.ref('bots/' + this.currentBotId + '/connections').set(this.studioConnections);
+      showModal('Успешно', 'Студия сохранена! Бот обновлен.');
+      document.querySelector('.modal-overlay')?.remove();
+    }
+  };
+
+  // ========== ЗАПУСК ==========
+  auth.onAuthStateChanged((user) => {
+    if (user) {
+      const statusRef = db.ref('status/' + user.uid);
+      statusRef.set({ online: true, lastSeen: Date.now() });
+      statusRef.onDisconnect().set({ online: false, lastSeen: Date.now() });
+      window.core.initApp(user);
+    } else {
+      window.core.renderLogin();
+    }
+  });
+
+} catch(e) {
+  document.getElementById('app').innerHTML = `<div style="padding:40px;color:#ff4466;text-align:center;font-family:system-ui;margin-top:30vh;"><h2>ОШИБКА ПОДКЛЮЧЕНИЯ</h2><p>${e.message}</p></div>`;
+}
+</script>
+</body>
+</html>
